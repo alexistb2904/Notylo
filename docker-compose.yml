@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: notylo
+      POSTGRES_USER: notylo
+      POSTGRES_PASSWORD: notylo
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notylo -d notylo"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    ports: ["5433:5432"]
+  minio:
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-notylo}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-change-me-in-production}
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["minio_data:/data"]
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      PORT: 3001
+      JWT_SECRET: ${JWT_SECRET:-development-only-secret-replace-before-deploying}
+      REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-false}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://notylo:notylo@postgres:5432/notylo}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-notylo}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change-me-in-production}
+      MINIO_BUCKET: ${MINIO_BUCKET:-notylo-assets}
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-localhost}
+      WEBAUTHN_ORIGIN: ${WEBAUTHN_ORIGIN:-http://localhost:5173}
+    ports: ["3001:3001"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+  ocr:
+    build: ./services/ocr
+    environment:
+      OCR_TEXT_WORKERS: ${OCR_TEXT_WORKERS:-3}
+      OCR_MATH_WORKERS: ${OCR_MATH_WORKERS:-1}
+    ports: ["8001:8001"]
+volumes:
+  postgres_data:
+  minio_data:

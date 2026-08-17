@@ -1,0 +1,9 @@
+{
+  "name": "Notylo Notes",
+  "short_name": "Notylo",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f4f2",
+  "theme_color": "#171717",
+  "icons": []
+}

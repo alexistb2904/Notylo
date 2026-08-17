@@ -1,0 +1,27 @@
+{
+  "name": "@notylo/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --env-file=../../.env --import tsx/esm src/server.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1111.0",
+    "@fastify/cors": "^11.1.0",
+    "@fastify/jwt": "^9.1.0",
+    "@fastify/websocket": "^11.2.0",
+    "@simplewebauthn/server": "^13.3.2",
+    "fastify": "^5.5.0",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/pg": "^8.15.5",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
