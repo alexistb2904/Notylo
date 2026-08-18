@@ -1,0 +1,754 @@
+# Notylo
+
+**Notylo** is a local-first note-taking and whiteboard application designed for pen, touch, keyboard and mixed documents.
+
+The current V1 focuses on the web application. Notes are always saved locally first, while an optional self-hosted cloud can synchronize notebooks between devices without making note-taking dependent on the network.
+
+> **Project status:** V1 / active development. The editor, local persistence, account system and snapshot-based private cloud are functional. Some advanced features, notably the final OCR workflow inside the editor, are still being integrated.
+
+## Highlights
+
+- 📖 Page-based notebooks and infinite whiteboards
+- ✍️ Pen/touch input with pressure-aware ink
+- 🧲 Selection, lasso, move, resize, undo/redo
+- 📝 Text, shapes, tables and LaTeX math objects
+- 🖼️ Images, clipboard paste and drag-and-drop
+- 📄 PDF, DOCX, XLSX/CSV and common document imports
+- 🧮 Automatic math evaluation for supported expressions
+- 💾 IndexedDB local-first persistence and periodic snapshots
+- ☁️ Optional private cloud with account authentication
+- 🔑 Email/password authentication and WebAuthn passkeys
+- 📦 Native `.notezip` import/export
+- 🐳 Docker-based API, PostgreSQL, MinIO and OCR services
+- 🌐 Installable web/PWA foundation, ready for a later Tauri wrapper
+
+## How storage works
+
+Notylo deliberately separates **local save** from **cloud synchronization**.
+
+1. Editing a notebook writes to IndexedDB on the current device.
+2. Local saves never wait for the server.
+3. If you are signed in, Notylo synchronizes the notebook snapshot with your private cloud.
+4. A local synchronization checkpoint remembers the last cloud version seen by the current device.
+5. If only one side changed, the newer side is applied automatically.
+6. If both local and cloud copies changed since the last checkpoint, Notylo keeps both copies intact and asks which one to keep.
+7. If the server or network is unavailable, editing continues locally and cloud upload is retried after connectivity returns.
+
+Attachments are stored locally as blobs and remotely in MinIO. Their hashes are checkpointed so an unchanged attachment is not uploaded on every notebook save.
+
+> The V1 synchronization model is snapshot reconciliation, not real-time collaborative CRDT editing. The repository already contains a WebSocket endpoint for future real-time work, but the current web editor does not depend on it.
+
+---
+
+## Architecture
+
+```text
+Notylo
+├── apps/
+│   ├── web/           React + Vite editor/PWA
+│   ├── api/           Fastify private cloud API
+│   └── desktop/       Future Tauri integration notes
+├── packages/
+│   ├── canvas-engine/
+│   ├── document-model/
+│   ├── import-export/
+│   ├── math-engine/
+│   ├── persistence/
+│   └── shared/
+├── services/
+│   └── ocr/           FastAPI + Tesseract + pix2tex
+├── docker/
+│   └── init.sql
+├── docker-compose.yml
+└── docker-compose.cloud.yml
+```
+
+### Web
+
+- React
+- TypeScript
+- Vite
+- IndexedDB / Dexie
+- PDF.js
+- Mammoth
+- SheetJS
+- KaTeX
+- perfect-freehand
+
+### Private cloud
+
+- Fastify / Node.js
+- PostgreSQL
+- MinIO (S3-compatible object storage)
+- JWT access + refresh tokens
+- WebAuthn/passkeys
+
+### OCR service
+
+- FastAPI
+- native Tesseract (`fra`, `eng`, `fra+eng`)
+- OpenCV preprocessing
+- pix2tex for math OCR
+- CPU worker limits configurable through environment variables
+
+The pix2tex model is loaded lazily and then reused by the OCR process, which avoids reloading the model for every request on a CPU-only VPS.
+
+---
+
+# Run Notylo locally
+
+## Requirements
+
+Recommended:
+
+- **Node.js 24**
+- **pnpm 11**
+- Corepack
+- Docker + Docker Compose for cloud/OCR services
+
+Check your versions:
+
+```bash
+node --version
+corepack --version
+docker --version
+docker compose version
+```
+
+Enable pnpm through Corepack:
+
+```bash
+corepack enable
+```
+
+## 1. Clone and install
+
+```bash
+git clone https://github.com/alexistb2904/Notylo.git
+cd Notylo
+pnpm install --frozen-lockfile
+```
+
+## 2. Local-only mode
+
+If you only want the editor and do not need an account, PostgreSQL, MinIO or OCR:
+
+```bash
+pnpm dev
+```
+
+Open:
+
+```text
+http://localhost:5173
+```
+
+That is enough to:
+
+- create notebooks;
+- draw and edit locally;
+- close/reopen the browser and recover notebooks from IndexedDB;
+- import/export supported local files.
+
+The account service may show as unavailable. This is expected in local-only mode and does **not** prevent local note-taking.
+
+## 3. Local mode with private cloud services
+
+Create your local environment:
+
+```bash
+cp .env.example .env
+```
+
+For development, the defaults are sufficient.
+
+Then either run the backend services in Docker:
+
+```bash
+docker compose up -d postgres minio api ocr
+pnpm dev
+```
+
+or run PostgreSQL/MinIO/OCR in Docker and the API directly with Node:
+
+```bash
+docker compose up -d postgres minio ocr
+pnpm dev:api
+```
+
+In another terminal:
+
+```bash
+pnpm dev
+```
+
+Useful local endpoints:
+
+| Service | URL |
+|---|---|
+| Web app | `http://localhost:5173` |
+| API health | `http://localhost:3001/health` |
+| MinIO S3 | `http://localhost:9000` |
+| MinIO console | `http://localhost:9001` |
+| OCR health | `http://localhost:8001/health` |
+
+Check the containers:
+
+```bash
+docker compose ps
+```
+
+Follow logs:
+
+```bash
+docker compose logs -f api
+docker compose logs -f ocr
+```
+
+Stop the services without deleting data:
+
+```bash
+docker compose down
+```
+
+Delete the local Docker data as well:
+
+```bash
+docker compose down -v
+```
+
+---
+
+# Accounts and cloud connection
+
+## Create an account locally
+
+Local Docker configuration enables registration by default.
+
+1. Start PostgreSQL, MinIO and the API.
+2. Open Notylo.
+3. Click **Se connecter**.
+4. Click **Créer un compte**.
+5. Enter an email address and a password of at least 10 characters.
+6. After authentication, the library performs an initial cloud reconciliation.
+
+The account is only needed for cloud features. Existing local notebooks remain available when logged out.
+
+## Sessions
+
+The API issues:
+
+- a short-lived access token;
+- a longer-lived refresh token.
+
+The web client refreshes the session automatically while it is open, when the browser returns to the foreground and when the network comes back.
+
+Authentication data is currently kept in `sessionStorage`. This intentionally keeps the session browser-session scoped; a new browser session can therefore require signing in again.
+
+## Passkeys
+
+Passkeys work on:
+
+- `localhost`, for development;
+- a real **HTTPS** origin in production.
+
+For production, these values must match the public web application exactly:
+
+```env
+WEBAUTHN_RP_ID=notes.example.com
+WEBAUTHN_ORIGIN=https://notes.example.com
+```
+
+`WEBAUTHN_RP_ID` is the hostname only. Do not include `https://` or a path.
+
+---
+
+# Deploy the private cloud on a VPS
+
+The production compose file is designed for a small private VPS. PostgreSQL, MinIO, API and OCR stay on the internal Docker network. Only the web container is bound to `127.0.0.1`, ready to sit behind Caddy, Nginx Proxy Manager, Traefik or another HTTPS reverse proxy.
+
+## Recommended VPS baseline
+
+For the current V1:
+
+- Linux x86_64
+- Docker Engine + Docker Compose
+- 4–6 CPU cores recommended if math OCR is used
+- 4 GB RAM minimum; more is preferable for pix2tex
+- persistent storage for Docker volumes
+- a domain/subdomain
+- HTTPS
+
+For a 6-core CPU-only VPS, the default OCR limits are intentionally conservative:
+
+```env
+OCR_TEXT_WORKERS=3
+OCR_MATH_WORKERS=1
+```
+
+Tesseract can process several jobs in parallel; pix2tex is kept to one concurrent math job to avoid saturating memory/CPU.
+
+## 1. Clone the repository
+
+```bash
+git clone https://github.com/alexistb2904/Notylo.git
+cd Notylo
+```
+
+For a private repository, authenticate Git on the VPS using your preferred GitHub credential method.
+
+## 2. Create the production environment
+
+```bash
+cp .env.cloud.example .env
+```
+
+Generate strong secrets, for example:
+
+```bash
+openssl rand -hex 48
+```
+
+Edit `.env`:
+
+```env
+POSTGRES_PASSWORD=<random-secret>
+
+MINIO_ACCESS_KEY=notylo
+MINIO_SECRET_KEY=<random-secret>
+MINIO_BUCKET=notylo-assets
+
+JWT_SECRET=<random-secret-at-least-32-characters>
+
+REGISTRATION_ENABLED=true
+
+CORS_ORIGIN=https://notes.example.com
+WEBAUTHN_RP_ID=notes.example.com
+WEBAUTHN_ORIGIN=https://notes.example.com
+
+OCR_TEXT_WORKERS=3
+OCR_MATH_WORKERS=1
+
+WEB_PORT=8080
+LOG_LEVEL=info
+```
+
+Do not commit `.env`.
+
+## 3. Build and start
+
+```bash
+docker compose -f docker-compose.cloud.yml up -d --build
+```
+
+Check status:
+
+```bash
+docker compose -f docker-compose.cloud.yml ps
+```
+
+The application is now available locally on the VPS at:
+
+```text
+http://127.0.0.1:8080
+```
+
+The database, MinIO and API are **not** directly published to the internet.
+
+## 4. Put HTTPS in front
+
+### Caddy example
+
+If Caddy is installed on the host:
+
+```caddyfile
+notes.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+Reload Caddy after changing the configuration.
+
+Caddy can then terminate HTTPS while the bundled web Nginx container proxies:
+
+```text
+/api/*  -> Fastify API
+/ocr/*  -> FastAPI OCR
+/*      -> React application
+```
+
+Using a single public origin avoids unnecessary cross-origin complexity and is also the cleanest setup for passkeys.
+
+If you use Nginx Proxy Manager, Traefik or Cloudflare Tunnel instead, point it at:
+
+```text
+127.0.0.1:8080
+```
+
+and keep the public URL identical to `CORS_ORIGIN` and `WEBAUTHN_ORIGIN`.
+
+## 5. Create the first account, then close registration
+
+With:
+
+```env
+REGISTRATION_ENABLED=true
+```
+
+create the accounts you need from the Notylo login dialog.
+
+For a private deployment, then switch to:
+
+```env
+REGISTRATION_ENABLED=false
+```
+
+and apply the configuration:
+
+```bash
+docker compose -f docker-compose.cloud.yml up -d
+```
+
+Existing accounts can still sign in. Only new account creation is disabled.
+
+## 6. Verify the deployment
+
+Through the public domain:
+
+```bash
+curl https://notes.example.com/api/health
+```
+
+Expected API state:
+
+```json
+{
+  "status": "ok",
+  "service": "notylo-api",
+  "database": "ready"
+}
+```
+
+OCR:
+
+```bash
+curl https://notes.example.com/ocr/health
+```
+
+Container logs:
+
+```bash
+docker compose -f docker-compose.cloud.yml logs -f api
+docker compose -f docker-compose.cloud.yml logs -f web
+docker compose -f docker-compose.cloud.yml logs -f ocr
+```
+
+---
+
+# How cloud synchronization behaves
+
+## First sign-in on a device
+
+When an account is connected:
+
+- cloud-only notebooks are downloaded locally;
+- local-only notebooks are uploaded;
+- notebooks that are identical establish a local synchronization checkpoint;
+- a pre-existing local and remote notebook with the same ID but different content is treated conservatively as a conflict.
+
+## Normal editing
+
+The editor:
+
+1. saves locally;
+2. debounces cloud uploads;
+3. checks the last synchronized version;
+4. uploads the document;
+5. only uploads attachments whose hash changed;
+6. retries transient failures.
+
+If the access token expires, the client refreshes the session and resumes synchronization.
+
+## Offline editing
+
+When the network disappears:
+
+- local IndexedDB saves continue;
+- no note-taking action depends on the API;
+- cloud operations resume after the `online` browser event or a later reconciliation.
+
+## Conflicts
+
+If both local and cloud copies changed from the same known checkpoint, Notylo does not silently overwrite either one.
+
+Return to the notebook library. Notylo displays the conflict dialog and offers:
+
+- **Garder cette copie** — upload the local copy and replace the cloud snapshot;
+- **Garder le cloud** — download the remote copy onto this device.
+
+## Current V1 limitation: notebook deletion
+
+Creation and modification are synchronized. Per-notebook deletion is still local-only in the current API and is planned for the next cloud iteration.
+
+Until the server-side delete route is added, deleting a local notebook does not guarantee removal of an already synchronized remote copy. Full account deletion does remove the account notebooks/assets server-side.
+
+This limitation is intentionally documented rather than hiding destructive behavior behind an unreliable client workaround.
+
+---
+
+# OCR service
+
+The OCR service exposes:
+
+```text
+GET  /health
+POST /ocr/text
+POST /ocr/math
+```
+
+Text OCR supports:
+
+```text
+fra
+eng
+fra+eng
+```
+
+The Docker image installs both French and English Tesseract language packs.
+
+Math OCR uses pix2tex and can be CPU-intensive. The model is loaded lazily once and then reused.
+
+> The OCR backend is operational, but the final selection/crop-to-OCR workflow in the web editor is still under development in this V1. Do not interpret the presence of the OCR container as meaning every OCR UI path is already finished.
+
+---
+
+# Production updates
+
+Pull the latest code:
+
+```bash
+git pull
+```
+
+Rebuild and restart:
+
+```bash
+docker compose -f docker-compose.cloud.yml up -d --build
+```
+
+Inspect status:
+
+```bash
+docker compose -f docker-compose.cloud.yml ps
+```
+
+Prune old unused Docker build data when needed:
+
+```bash
+docker builder prune
+```
+
+Do **not** use `docker compose down -v` on production unless you intentionally want to delete the PostgreSQL and MinIO volumes.
+
+---
+
+# Backups
+
+Cloud data is split between:
+
+- PostgreSQL — accounts and notebook snapshots;
+- MinIO — binary attachments.
+
+Back up both.
+
+## PostgreSQL
+
+```bash
+mkdir -p backup
+docker compose -f docker-compose.cloud.yml exec -T postgres \
+  pg_dump -U notylo notylo > backup/notylo.sql
+```
+
+## MinIO data
+
+A simple private VPS backup can copy the container data directory:
+
+```bash
+docker compose -f docker-compose.cloud.yml cp minio:/data ./backup/minio-data
+```
+
+For a production setup, automate off-machine backups as well.
+
+Users should also periodically export important notebooks as `.notezip`; this keeps a portable copy independent from the server.
+
+---
+
+# Quality checks
+
+Install dependencies first:
+
+```bash
+pnpm install --frozen-lockfile
+```
+
+TypeScript:
+
+```bash
+pnpm typecheck
+```
+
+Lint:
+
+```bash
+pnpm lint
+```
+
+Unit tests:
+
+```bash
+pnpm test
+```
+
+Web build:
+
+```bash
+pnpm build
+```
+
+End-to-end tests:
+
+```bash
+pnpm test:e2e
+```
+
+Playwright browsers may need to be installed once:
+
+```bash
+pnpm exec playwright install
+```
+
+---
+
+# Troubleshooting
+
+## “Le service cloud est indisponible”
+
+Check:
+
+```bash
+docker compose ps
+docker compose logs api
+```
+
+Then:
+
+```bash
+curl http://localhost:3001/health
+```
+
+For production:
+
+```bash
+curl https://notes.example.com/api/health
+```
+
+The local notebook is not deleted when this happens.
+
+## I cannot create an account
+
+Check:
+
+```env
+REGISTRATION_ENABLED=true
+```
+
+Then restart/recreate the API container:
+
+```bash
+docker compose up -d api
+```
+
+In production:
+
+```bash
+docker compose -f docker-compose.cloud.yml up -d api
+```
+
+## CORS errors in production
+
+`CORS_ORIGIN` must be the exact public origin:
+
+```env
+CORS_ORIGIN=https://notes.example.com
+```
+
+Avoid a trailing slash.
+
+## Passkey registration fails
+
+Verify all three conditions:
+
+```env
+CORS_ORIGIN=https://notes.example.com
+WEBAUTHN_RP_ID=notes.example.com
+WEBAUTHN_ORIGIN=https://notes.example.com
+```
+
+and verify the browser is actually using HTTPS.
+
+## API works but attachments do not synchronize
+
+Check MinIO and API logs:
+
+```bash
+docker compose logs minio
+docker compose logs api
+```
+
+In production:
+
+```bash
+docker compose -f docker-compose.cloud.yml logs minio
+docker compose -f docker-compose.cloud.yml logs api
+```
+
+## OCR is slow on the first math request
+
+The first pix2tex request initializes the model. Later requests reuse it.
+
+For a CPU-only VPS, keep:
+
+```env
+OCR_MATH_WORKERS=1
+```
+
+unless you have measured enough CPU and memory headroom to increase it.
+
+---
+
+# Security notes
+
+For an internet-accessible private deployment:
+
+- use HTTPS;
+- use strong unique PostgreSQL, MinIO and JWT secrets;
+- never commit `.env`;
+- keep PostgreSQL and MinIO off public ports;
+- disable public registration after creating your accounts;
+- keep Docker and the host OS updated;
+- back up PostgreSQL and MinIO;
+- treat `.notezip` exports as potentially sensitive documents.
+
+---
+
+# Desktop roadmap
+
+The V1 is intentionally web-first. The document model, persistence and platform abstractions are kept separate so the same frontend can later be wrapped with **Tauri 2** for Windows and Linux instead of maintaining a second editor implementation.
+
+See `apps/desktop/README.md` for the current desktop integration notes.
+
+---
+
+## License
+
+No public license has been declared in the repository yet. Until one is added, the repository remains under the default copyright rules applicable to its owner.

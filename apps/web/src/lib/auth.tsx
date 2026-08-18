@@ -17,11 +17,19 @@ type AuthState = {
   login(email: string, password: string): Promise<void>;
   register(email: string, password: string): Promise<void>;
   loginWithPasskey(email: string): Promise<void>;
+  refreshSession(): Promise<boolean>;
   updateUser(user: Account): void;
   logout(): void;
 };
 
+type StoredSession = {
+  readonly accessToken: string;
+  readonly refreshToken: string;
+  readonly user?: Account;
+};
+
 const storageKey = "notylo-auth";
+const refreshIntervalMs = 10 * 60 * 1000;
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
 export function AuthProvider({ children }: { readonly children: ReactNode }) {
@@ -31,44 +39,77 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   const [registrationEnabled, setRegistrationEnabled] = useState(false);
 
   const store = useCallback((result: AuthResponse) => {
-    sessionStorage.setItem(
-      storageKey,
-      JSON.stringify({ accessToken: result.accessToken, refreshToken: result.refreshToken })
-    );
+    const session: StoredSession = {
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      user: result.user
+    };
+    sessionStorage.setItem(storageKey, JSON.stringify(session));
     setAccessToken(result.accessToken);
     setUser(result.user);
   }, []);
+
   const clear = useCallback(() => {
     sessionStorage.removeItem(storageKey);
     setAccessToken(undefined);
     setUser(undefined);
   }, []);
 
+  const refreshSession = useCallback(async (): Promise<boolean> => {
+    const saved = readStoredSession();
+    if (!saved) return false;
+    try {
+      store(await api.refresh(saved.refreshToken));
+      return true;
+    } catch (error) {
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) clear();
+      return false;
+    }
+  }, [clear, store]);
+
   useEffect(() => {
     let active = true;
-    void (async () => {
-      const config = await api.authConfig().catch(() => ({ registrationEnabled: false }));
-      if (!active) return;
-      setRegistrationEnabled(config.registrationEnabled);
-      const saved = readStoredTokens();
-      if (!saved) {
-        setReady(true);
-        return;
-      }
-      try {
-        const result = await api.refresh(saved.refreshToken);
-        if (!active) return;
-        store(result);
-      } catch {
-        if (active) clear();
-      } finally {
-        if (active) setReady(true);
-      }
-    })();
+
+    void api
+      .authConfig()
+      .then((config) => {
+        if (active) setRegistrationEnabled(config.registrationEnabled);
+      })
+      .catch(() => undefined);
+
+    const saved = readStoredSession();
+    if (saved?.user) {
+      setUser(saved.user);
+      setAccessToken(saved.accessToken);
+    }
+    setReady(true);
+    if (saved) void refreshSession();
+
     return () => {
       active = false;
     };
-  }, [clear, store]);
+  }, [refreshSession]);
+
+  useEffect(() => {
+    if (!ready) return;
+
+    const refresh = () => {
+      void refreshSession();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+
+    const interval = window.setInterval(refresh, refreshIntervalMs);
+    window.addEventListener("online", refresh);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("online", refresh);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [ready, refreshSession]);
 
   const login = useCallback(
     async (email: string, password: string) => store(await api.login(email, password)),
@@ -89,7 +130,13 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     },
     [store]
   );
-  const updateUser = useCallback((nextUser: Account) => setUser(nextUser), []);
+  const updateUser = useCallback((nextUser: Account) => {
+    setUser(nextUser);
+    const stored = readStoredSession();
+    if (stored)
+      sessionStorage.setItem(storageKey, JSON.stringify({ ...stored, user: nextUser }));
+  }, []);
+
   const value = useMemo(
     () => ({
       user,
@@ -99,6 +146,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
       login,
       register,
       loginWithPasskey,
+      refreshSession,
       updateUser,
       logout: clear
     }),
@@ -110,6 +158,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
       login,
       register,
       loginWithPasskey,
+      refreshSession,
       updateUser,
       clear
     ]
@@ -124,20 +173,35 @@ export function useAuth(): AuthState {
 }
 
 export function authErrorMessage(error: unknown): string {
-  return error instanceof ApiError
-    ? error.message
-    : "La connexion a échoué. Réessayez dans un instant.";
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof DOMException && error.name === "NotAllowedError")
+    return "La passkey a été annulée ou refusée.";
+  return "La connexion a échoué. Réessayez dans un instant.";
 }
 
-function readStoredTokens(): { accessToken: string; refreshToken: string } | undefined {
+function readStoredSession(): StoredSession | undefined {
   try {
-    const value = JSON.parse(
-      sessionStorage.getItem(storageKey) ?? "null"
-    ) as Partial<AuthResponse> | null;
-    if (typeof value?.accessToken === "string" && typeof value.refreshToken === "string")
-      return { accessToken: value.accessToken, refreshToken: value.refreshToken };
+    const value = JSON.parse(sessionStorage.getItem(storageKey) ?? "null") as
+      | Partial<StoredSession>
+      | null;
+    if (typeof value?.accessToken !== "string" || typeof value.refreshToken !== "string")
+      return undefined;
+
+    const account =
+      value.user &&
+      typeof value.user.id === "string" &&
+      typeof value.user.email === "string" &&
+      typeof value.user.displayName === "string"
+        ? value.user
+        : undefined;
+
+    return {
+      accessToken: value.accessToken,
+      refreshToken: value.refreshToken,
+      ...(account ? { user: account } : {})
+    };
   } catch {
     sessionStorage.removeItem(storageKey);
+    return undefined;
   }
-  return undefined;
 }
