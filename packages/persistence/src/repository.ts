@@ -8,24 +8,37 @@ import type {
 import { createId, migrateDocument } from "@notylo/document-model";
 import { getDatabase, type StoredAsset } from "./database";
 
+function deletionQueueId(notebookId: string): string {
+  return `delete:${notebookId}`;
+}
+
 export class NotebookRepository {
   async save(document: NotebookDocument): Promise<void> {
     const db = getDatabase();
-    await db.transaction("rw", db.notebooks, db.pages, db.objects, db.assetRefs, async () => {
-      await db.notebooks.put(document.notebook);
-      await db.pages.where("notebookId").equals(document.notebook.id).delete();
-      await db.objects.where("notebookId").equals(document.notebook.id).delete();
-      await db.assetRefs.where("notebookId").equals(document.notebook.id).delete();
-      await db.pages.bulkPut([...document.pages]);
-      await db.objects.bulkPut([...document.objects]);
-      await db.assetRefs.bulkPut(
-        document.assets.map((asset) => ({
-          key: `${document.notebook.id}:${asset.id}`,
-          notebookId: document.notebook.id,
-          assetId: asset.id
-        }))
-      );
-    });
+    await db.transaction(
+      "rw",
+      db.notebooks,
+      db.pages,
+      db.objects,
+      db.assetRefs,
+      db.syncQueue,
+      async () => {
+        await db.syncQueue.delete(deletionQueueId(document.notebook.id));
+        await db.notebooks.put(document.notebook);
+        await db.pages.where("notebookId").equals(document.notebook.id).delete();
+        await db.objects.where("notebookId").equals(document.notebook.id).delete();
+        await db.assetRefs.where("notebookId").equals(document.notebook.id).delete();
+        await db.pages.bulkPut([...document.pages]);
+        await db.objects.bulkPut([...document.objects]);
+        await db.assetRefs.bulkPut(
+          document.assets.map((asset) => ({
+            key: `${document.notebook.id}:${asset.id}`,
+            notebookId: document.notebook.id,
+            assetId: asset.id
+          }))
+        );
+      }
+    );
   }
 
   async load(notebookId: string): Promise<NotebookDocument | undefined> {
@@ -55,7 +68,16 @@ export class NotebookRepository {
   }
 
   async remove(notebookId: string): Promise<void> {
+    await this.removeInternal(notebookId, true);
+  }
+
+  async removeLocal(notebookId: string): Promise<void> {
+    await this.removeInternal(notebookId, false);
+  }
+
+  private async removeInternal(notebookId: string, queueCloudDelete: boolean): Promise<void> {
     const db = getDatabase();
+    const now = Date.now();
     await db.transaction(
       "rw",
       db.notebooks,
@@ -63,7 +85,18 @@ export class NotebookRepository {
       db.objects,
       db.snapshots,
       db.assetRefs,
+      db.syncQueue,
       async () => {
+        await db.syncQueue.where("notebookId").equals(notebookId).delete();
+        if (queueCloudDelete) {
+          await db.syncQueue.put({
+            id: deletionQueueId(notebookId),
+            notebookId,
+            type: "delete",
+            payload: { deletedAt: now },
+            createdAt: now
+          });
+        }
         await db.notebooks.delete(notebookId);
         await db.pages.where("notebookId").equals(notebookId).delete();
         await db.objects.where("notebookId").equals(notebookId).delete();

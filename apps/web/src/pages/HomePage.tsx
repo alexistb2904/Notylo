@@ -178,6 +178,17 @@ export function HomePage() {
     await refresh();
     setConfirmDelete(false);
     setNotebookMenu(undefined);
+
+    if (accessToken && navigator.onLine) {
+      setCloudStatus("syncing");
+      void reconcileCloud(accessToken)
+        .then(async (detectedConflicts) => {
+          await refresh();
+          setConflicts(detectedConflicts);
+          setCloudStatus(detectedConflicts.length ? "conflict" : "idle");
+        })
+        .catch(() => setCloudStatus("error"));
+    }
   };
   const today = new Intl.DateTimeFormat("fr-FR", {
     weekday: "long",
@@ -485,7 +496,10 @@ export function HomePage() {
           >
             <p className="eyebrow">Action irréversible</p>
             <h2>Supprimer « {notebookMenu.title} » ?</h2>
-            <p>Le cahier et ses pages seront retirés de cet appareil.</p>
+            <p>
+              Le cahier sera retiré immédiatement de cet appareil. La suppression cloud sera
+              synchronisée dès qu’une connexion et un compte seront disponibles.
+            </p>
             <div className="dialog-actions">
               <button className="text-button" onClick={() => setConfirmDelete(false)}>
                 Annuler
@@ -509,35 +523,57 @@ export function HomePage() {
             aria-modal="true"
             aria-labelledby="sync-conflict-title"
           >
-            <p className="eyebrow">Conflit de synchronisation</p>
-            <h2 id="sync-conflict-title">Choisir la copie de « {conflicts[0].title} »</h2>
+            <p className="eyebrow">
+              {conflicts[0].kind === "deleted"
+                ? "Conflit de suppression"
+                : "Conflit de synchronisation"}
+            </p>
+            <h2 id="sync-conflict-title">
+              {conflicts[0].kind === "deleted"
+                ? `« ${conflicts[0].title} » a été supprimé dans le cloud`
+                : `Choisir la copie de « ${conflicts[0].title} »`}
+            </h2>
             <p className="sync-conflict-intro">
-              Les deux copies ont été modifiées. La version choisie deviendra immédiatement la
-              nouvelle copie cloud.
+              {conflicts[0].kind === "deleted"
+                ? "Cet appareil contient une copie modifiée depuis la dernière synchronisation. Choisissez si vous souhaitez la restaurer ou accepter la suppression cloud."
+                : "Les deux copies ont été modifiées. La version choisie deviendra immédiatement la nouvelle copie cloud."}
             </p>
             <div className="sync-conflict-options">
               <article>
-                <p>Cette appareil</p>
+                <p>Cet appareil</p>
                 <strong>{formatSyncDate(conflicts[0].local.notebook.updatedAt)}</strong>
-                <small>Conserver cette copie puis remplacer le cloud.</small>
+                <small>
+                  {conflicts[0].kind === "deleted"
+                    ? "Restaurer cette copie dans le cloud."
+                    : "Conserver cette copie puis remplacer le cloud."}
+                </small>
                 <button
                   className="primary-action"
                   disabled={resolvingConflict}
                   onClick={() => void resolveCurrentConflict("local")}
                 >
-                  Garder cette copie
+                  {conflicts[0].kind === "deleted" ? "Restaurer le cahier" : "Garder cette copie"}
                 </button>
               </article>
               <article>
                 <p>Cloud</p>
-                <strong>{formatSyncDate(conflicts[0].cloud.notebook.updatedAt)}</strong>
-                <small>Remplacer la copie de cet appareil par le cloud.</small>
+                {conflicts[0].kind === "deleted" ? (
+                  <>
+                    <strong>Supprimé {formatSyncDate(conflicts[0].deletedAt)}</strong>
+                    <small>Supprimer aussi la copie modifiée de cet appareil.</small>
+                  </>
+                ) : (
+                  <>
+                    <strong>{formatSyncDate(conflicts[0].cloud.notebook.updatedAt)}</strong>
+                    <small>Remplacer la copie de cet appareil par le cloud.</small>
+                  </>
+                )}
                 <button
                   className="outline-action"
                   disabled={resolvingConflict}
                   onClick={() => void resolveCurrentConflict("cloud")}
                 >
-                  Garder le cloud
+                  {conflicts[0].kind === "deleted" ? "Accepter la suppression" : "Garder le cloud"}
                 </button>
               </article>
             </div>

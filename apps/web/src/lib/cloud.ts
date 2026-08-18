@@ -12,19 +12,64 @@ type CloudSyncMeta = {
   readonly syncedAt: number;
 };
 
-export type SyncConflict = {
+type DocumentSyncConflict = {
+  readonly kind: "document";
   readonly notebookId: string;
   readonly title: string;
   readonly local: NotebookDocument;
   readonly cloud: NotebookDocument;
 };
 
+type DeletionSyncConflict = {
+  readonly kind: "deleted";
+  readonly notebookId: string;
+  readonly title: string;
+  readonly local: NotebookDocument;
+  readonly deletedAt: number;
+};
+
+export type SyncConflict = DocumentSyncConflict | DeletionSyncConflict;
+
 export async function reconcileCloud(accessToken: string): Promise<readonly SyncConflict[]> {
+  await flushPendingDeletes(accessToken);
+
   const remote = await cloudApi.list(accessToken);
-  const remoteIds = new Set(remote.notebooks.map((entry) => entry.id));
-  const localNotebooks = await repository.list();
-  const localById = new Map(localNotebooks.map((notebook) => [notebook.id, notebook]));
+  const remoteDeleted = remote.deletedNotebooks ?? [];
+  const remoteDeletedIds = new Set(remoteDeleted.map((entry) => entry.id));
   const conflicts: SyncConflict[] = [];
+
+  let localNotebooks = await repository.list();
+  let localById = new Map(localNotebooks.map((notebook) => [notebook.id, notebook]));
+
+  for (const tombstone of remoteDeleted) {
+    const localSummary = localById.get(tombstone.id);
+    if (!localSummary) {
+      await clearSyncMeta(tombstone.id);
+      continue;
+    }
+
+    const meta = await readSyncMeta(tombstone.id);
+    const localChanged = !meta || localSummary.updatedAt !== meta.documentUpdatedAt;
+    if (localChanged) {
+      const local = await repository.load(tombstone.id);
+      if (local)
+        conflicts.push({
+          kind: "deleted",
+          notebookId: tombstone.id,
+          title: localSummary.title,
+          local,
+          deletedAt: tombstone.deletedAt
+        });
+      continue;
+    }
+
+    await repository.removeLocal(tombstone.id);
+    await clearSyncMeta(tombstone.id);
+  }
+
+  localNotebooks = await repository.list();
+  localById = new Map(localNotebooks.map((notebook) => [notebook.id, notebook]));
+  const remoteIds = new Set(remote.notebooks.map((entry) => entry.id));
 
   for (const entry of remote.notebooks) {
     const localSummary = localById.get(entry.id);
@@ -45,11 +90,7 @@ export async function reconcileCloud(accessToken: string): Promise<readonly Sync
       if (!localDocument || !remoteDocument) continue;
 
       let assetHashes: Readonly<Record<string, string>> = meta?.assetHashes ?? {};
-      assetHashes = await uploadChangedAssets(
-        accessToken,
-        localDocument,
-        assetHashes
-      );
+      assetHashes = await uploadChangedAssets(accessToken, localDocument, assetHashes);
       assetHashes = {
         ...assetHashes,
         ...(await downloadAssets(accessToken, remoteDocument, true))
@@ -65,6 +106,7 @@ export async function reconcileCloud(accessToken: string): Promise<readonly Sync
       ]);
       if (localDocument && remoteDocument)
         conflicts.push({
+          kind: "document",
           notebookId: entry.id,
           title: localSummary.title,
           local: localDocument,
@@ -83,6 +125,7 @@ export async function reconcileCloud(accessToken: string): Promise<readonly Sync
       ]);
       if (localDocument && remoteDocument)
         conflicts.push({
+          kind: "document",
           notebookId: entry.id,
           title: localSummary.title,
           local: localDocument,
@@ -110,7 +153,7 @@ export async function reconcileCloud(accessToken: string): Promise<readonly Sync
   }
 
   for (const notebook of localNotebooks) {
-    if (remoteIds.has(notebook.id)) continue;
+    if (remoteIds.has(notebook.id) || remoteDeletedIds.has(notebook.id)) continue;
     const local = await repository.load(notebook.id);
     if (local) await uploadDocument(accessToken, local);
   }
@@ -118,11 +161,35 @@ export async function reconcileCloud(accessToken: string): Promise<readonly Sync
   return conflicts;
 }
 
+export async function flushPendingDeletes(accessToken: string): Promise<void> {
+  const db = getDatabase();
+  const pending = (await db.syncQueue.toArray())
+    .filter((item) => item.type === "delete")
+    .sort((left, right) => left.createdAt - right.createdAt);
+
+  for (const item of pending) {
+    await cloudApi.deleteNotebook(accessToken, item.notebookId, deletionTimestamp(item));
+    await db.syncQueue.delete(item.id);
+    await clearSyncMeta(item.notebookId);
+  }
+}
+
 export async function resolveConflict(
   accessToken: string,
   conflict: SyncConflict,
   keep: "local" | "cloud"
 ): Promise<void> {
+  if (conflict.kind === "deleted") {
+    if (keep === "local") {
+      await uploadDocument(accessToken, conflict.local, true);
+      return;
+    }
+
+    await repository.removeLocal(conflict.notebookId);
+    await clearSyncMeta(conflict.notebookId);
+    return;
+  }
+
   if (keep === "local") {
     await uploadDocument(accessToken, conflict.local, true);
     return;
@@ -130,11 +197,7 @@ export async function resolveConflict(
 
   const assetHashes = await downloadAssets(accessToken, conflict.cloud);
   await repository.save(conflict.cloud);
-  await writeSyncMeta(
-    conflict.notebookId,
-    conflict.cloud.notebook.updatedAt,
-    assetHashes
-  );
+  await writeSyncMeta(conflict.notebookId, conflict.cloud.notebook.updatedAt, assetHashes);
 }
 
 export async function uploadDocument(
@@ -149,12 +212,10 @@ export async function uploadDocument(
     const remoteDocument = await loadCloudDocument(accessToken, notebookId);
     if (remoteDocument) {
       if (meta) {
-        const remoteChanged =
-          remoteDocument.notebook.updatedAt !== meta.documentUpdatedAt;
+        const remoteChanged = remoteDocument.notebook.updatedAt !== meta.documentUpdatedAt;
         const remoteAlreadyMatchesLocal =
           remoteDocument.notebook.updatedAt === document.notebook.updatedAt;
-        if (remoteChanged && !remoteAlreadyMatchesLocal)
-          throw syncConflictError(remoteDocument);
+        if (remoteChanged && !remoteAlreadyMatchesLocal) throw syncConflictError(remoteDocument);
       } else if (remoteDocument.notebook.updatedAt !== document.notebook.updatedAt) {
         throw syncConflictError(remoteDocument);
       }
@@ -165,11 +226,7 @@ export async function uploadDocument(
 
   // Persist the document checkpoint before assets. If an asset upload fails,
   // the next retry knows the document snapshot itself is already accepted.
-  await writeSyncMeta(
-    notebookId,
-    document.notebook.updatedAt,
-    meta?.assetHashes ?? {}
-  );
+  await writeSyncMeta(notebookId, document.notebook.updatedAt, meta?.assetHashes ?? {});
 
   const assetHashes = await uploadChangedAssets(
     accessToken,
@@ -195,12 +252,7 @@ async function uploadChangedAssets(
     const local = await repository.getAsset(asset.id);
     if (!local || local.hash !== asset.hash) continue;
 
-    await cloudApi.uploadAsset(
-      accessToken,
-      document.notebook.id,
-      asset.id,
-      local.blob
-    );
+    await cloudApi.uploadAsset(accessToken, document.notebook.id, asset.id, local.blob);
     next[asset.id] = asset.hash;
   }
 
@@ -272,8 +324,20 @@ async function writeSyncMeta(
   });
 }
 
+async function clearSyncMeta(notebookId: string): Promise<void> {
+  await getDatabase().preferences.delete(syncMetaKey(notebookId));
+}
+
 function syncMetaKey(notebookId: string): string {
   return `${syncMetaPrefix}${notebookId}`;
+}
+
+function deletionTimestamp(item: { readonly payload: unknown; readonly createdAt: number }): number {
+  if (item.payload && typeof item.payload === "object" && "deletedAt" in item.payload) {
+    const deletedAt = (item.payload as { deletedAt?: unknown }).deletedAt;
+    if (typeof deletedAt === "number" && Number.isFinite(deletedAt)) return deletedAt;
+  }
+  return item.createdAt;
 }
 
 function syncConflictError(remoteDocument: NotebookDocument): ApiError {
