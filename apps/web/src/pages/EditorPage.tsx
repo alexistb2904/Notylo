@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   createId,
@@ -11,6 +11,7 @@ import { evaluateMath } from "@notylo/math-engine";
 import { EditorWorkspace } from "../components/EditorWorkspace";
 import { useDocumentSession } from "../lib/session";
 import { useAuth } from "../lib/auth";
+import { ApiError } from "../lib/api";
 import { uploadDocument } from "../lib/cloud";
 
 const repository = new NotebookRepository();
@@ -19,6 +20,7 @@ export function EditorPage() {
   const { id } = useParams();
   const [loaded, setLoaded] = useState<NotebookDocument>();
   const [error, setError] = useState<string>();
+
   useEffect(() => {
     if (!id) return;
     void repository
@@ -30,6 +32,7 @@ export function EditorPage() {
       )
       .catch(() => setError("Impossible d’ouvrir ce cahier. Vos autres cahiers restent intacts."));
   }, [id]);
+
   if (error)
     return (
       <main className="fatal-state">
@@ -38,6 +41,7 @@ export function EditorPage() {
         <p>{error}</p>
       </main>
     );
+
   if (!loaded)
     return (
       <main className="loading-state">
@@ -45,23 +49,92 @@ export function EditorPage() {
         <p>Ouverture du cahier…</p>
       </main>
     );
+
   return <LoadedEditor key={loaded.notebook.id} initial={loaded} />;
 }
 
 function LoadedEditor({ initial }: { readonly initial: NotebookDocument }) {
   const session = useDocumentSession(initial);
-  const { accessToken } = useAuth();
-  const uploadTimer = useRef<number | undefined>(undefined);
+  const { accessToken, refreshSession } = useAuth();
+  const latestDocument = useRef(session.document);
+  const debounceTimer = useRef<number | undefined>(undefined);
+  const retryTimer = useRef<number | undefined>(undefined);
+  const syncing = useRef(false);
+  const syncAgain = useRef(false);
+  const conflictBlocked = useRef(false);
+  const syncNowRef = useRef<() => Promise<void>>(async () => undefined);
+
+  latestDocument.current = session.document;
+
+  const syncNow = useCallback(async () => {
+    if (!accessToken || !navigator.onLine || conflictBlocked.current) return;
+    if (syncing.current) {
+      syncAgain.current = true;
+      return;
+    }
+
+    syncing.current = true;
+    window.clearTimeout(retryTimer.current);
+
+    try {
+      await uploadDocument(accessToken, latestDocument.current);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        conflictBlocked.current = true;
+      } else if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        void refreshSession();
+        retryTimer.current = window.setTimeout(() => {
+          void syncNowRef.current();
+        }, 2_000);
+      } else {
+        retryTimer.current = window.setTimeout(() => {
+          void syncNowRef.current();
+        }, 15_000);
+      }
+    } finally {
+      syncing.current = false;
+      if (syncAgain.current && !conflictBlocked.current) {
+        syncAgain.current = false;
+        debounceTimer.current = window.setTimeout(() => {
+          void syncNowRef.current();
+        }, 250);
+      }
+    }
+  }, [accessToken, refreshSession]);
+
+  syncNowRef.current = syncNow;
+
+  useEffect(() => {
+    conflictBlocked.current = false;
+  }, [accessToken]);
+
   useEffect(() => {
     if (!accessToken) return;
-    window.clearTimeout(uploadTimer.current);
-    uploadTimer.current = window.setTimeout(() => {
-      void uploadDocument(accessToken, session.document).catch(() => undefined);
-    }, 900);
-    return () => window.clearTimeout(uploadTimer.current);
+
+    window.clearTimeout(debounceTimer.current);
+    debounceTimer.current = window.setTimeout(() => {
+      void syncNowRef.current();
+    }, 1_800);
+
+    return () => window.clearTimeout(debounceTimer.current);
   }, [accessToken, session.document]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      window.clearTimeout(retryTimer.current);
+      void syncNowRef.current();
+    };
+    window.addEventListener("online", handleOnline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.clearTimeout(retryTimer.current);
+      window.clearTimeout(debounceTimer.current);
+    };
+  }, []);
+
   const add = (object: DocumentObject) =>
     session.commit({ kind: "add-object", object, label: "Ajouter un objet" });
+
   const update = (
     before: readonly DocumentObject[],
     after: readonly DocumentObject[],
@@ -69,6 +142,7 @@ function LoadedEditor({ initial }: { readonly initial: NotebookDocument }) {
   ) => {
     session.commit({ kind: "update-objects", before, after, label });
     if (!session.document.notebook.settings.autoCalculate) return;
+
     const source = after.find((object) => object.type === "text" || object.type === "math");
     const expression =
       source?.type === "text"
@@ -77,8 +151,10 @@ function LoadedEditor({ initial }: { readonly initial: NotebookDocument }) {
           ? source.latex
           : undefined;
     if (!source || !expression?.trim().endsWith("=")) return;
+
     const result = evaluateMath(expression);
     if (!result?.canSuggest) return;
+
     const now = Date.now();
     add({
       id: createId("calc"),
@@ -102,8 +178,10 @@ function LoadedEditor({ initial }: { readonly initial: NotebookDocument }) {
       accepted: false
     });
   };
+
   const remove = (objects: readonly DocumentObject[]) =>
     session.commit({ kind: "delete-objects", objects, label: "Supprimer" });
+
   const addPage = () => {
     if (session.document.notebook.mode !== "book") return;
     const prior = session.document.pages.at(-1);
@@ -116,6 +194,7 @@ function LoadedEditor({ initial }: { readonly initial: NotebookDocument }) {
     );
     session.commit({ kind: "add-page", page, label: "Ajouter une page" });
   };
+
   return (
     <EditorWorkspace
       document={session.document}
