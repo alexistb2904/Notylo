@@ -84,9 +84,11 @@ export class NotebookRepository {
       db.pages,
       db.objects,
       db.snapshots,
+      db.assets,
       db.assetRefs,
       db.syncQueue,
       async () => {
+        const refs = await db.assetRefs.where("notebookId").equals(notebookId).toArray();
         await db.syncQueue.where("notebookId").equals(notebookId).delete();
         if (queueCloudDelete) {
           await db.syncQueue.put({
@@ -102,6 +104,10 @@ export class NotebookRepository {
         await db.objects.where("notebookId").equals(notebookId).delete();
         await db.snapshots.where("notebookId").equals(notebookId).delete();
         await db.assetRefs.where("notebookId").equals(notebookId).delete();
+        for (const ref of refs) {
+          const stillReferenced = await db.assetRefs.where("assetId").equals(ref.assetId).count();
+          if (!stillReferenced) await db.assets.delete(ref.assetId);
+        }
       }
     );
   }
