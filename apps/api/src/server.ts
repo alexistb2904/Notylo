@@ -39,6 +39,7 @@ type PasskeyVerification = { response: RegistrationResponseJSON };
 type PasskeyLoginOptionsRequest = { email: string };
 type PasskeyLoginVerification = { email: string; response: AuthenticationResponseJSON };
 type AccountDeletion = { password: string; confirmation: string };
+type NotebookDeletionRequest = { deletedAt?: number };
 type StoredPasskey = {
   id: string;
   user_id: string;
@@ -109,6 +110,9 @@ app.addHook("onClose", async () => {
   await Promise.all([pool.end(), storage.destroy()]);
 });
 await ensureSchema();
+void drainPendingAssetDeletions().catch((error) =>
+  app.log.warn(error, "Deferred asset cleanup could not start")
+);
 
 app.get("/health", async () => {
   try {
@@ -509,21 +513,31 @@ app.post<{ Body: AccountDeletion }>(
 
 app.get("/cloud/notebooks", { preHandler: accessOnly }, async (request, reply) => {
   try {
-    const result = await pool.query<{
-      client_id: string;
-      title: string;
-      mode: "book" | "whiteboard";
-      updated_at: number;
-    }>(
-      "SELECT n.client_id, n.title, n.mode, (d.snapshot->'notebook'->>'updatedAt')::bigint AS updated_at FROM notebooks n JOIN documents d ON d.notebook_id = n.id WHERE n.owner_id = $1 ORDER BY d.updated_at DESC",
-      [request.user.sub]
-    );
+    const [result, deleted] = await Promise.all([
+      pool.query<{
+        client_id: string;
+        title: string;
+        mode: "book" | "whiteboard";
+        updated_at: number;
+      }>(
+        "SELECT n.client_id, n.title, n.mode, (d.snapshot->'notebook'->>'updatedAt')::bigint AS updated_at FROM notebooks n JOIN documents d ON d.notebook_id = n.id WHERE n.owner_id = $1 ORDER BY d.updated_at DESC",
+        [request.user.sub]
+      ),
+      pool.query<{ client_id: string; deleted_at: Date | string }>(
+        "SELECT client_id, deleted_at FROM notebook_tombstones WHERE owner_id = $1 ORDER BY deleted_at DESC",
+        [request.user.sub]
+      )
+    ]);
     return {
       notebooks: result.rows.map((row) => ({
         id: row.client_id,
         title: row.title,
         mode: row.mode,
         updatedAt: Number(row.updated_at)
+      })),
+      deletedNotebooks: deleted.rows.map((row) => ({
+        id: row.client_id,
+        deletedAt: new Date(row.deleted_at).getTime()
       }))
     };
   } catch (error) {
@@ -547,8 +561,10 @@ app.put<{ Params: { notebookId: string }; Body: { document: unknown; force?: boo
     if (!isCloudDocument(document) || document.notebook.id !== request.params.notebookId)
       return reply.code(400).send({ error: "Document invalide." });
     const client = await pool.connect();
+    const force = request.body?.force === true;
     try {
       await client.query("BEGIN");
+      await lockNotebook(client, request.params.notebookId);
       const existing = await client.query<{
         id: string;
         owner_id: string;
@@ -558,10 +574,23 @@ app.put<{ Params: { notebookId: string }; Body: { document: unknown; force?: boo
         [request.params.notebookId]
       );
       const current = existing.rows[0];
-      if (current && current.owner_id !== request.user.sub)
+      if (current && current.owner_id !== request.user.sub) {
+        await client.query("ROLLBACK");
         return reply.code(404).send({ error: "Cahier introuvable." });
+      }
+      const tombstone = await client.query<{ deleted_at: Date | string }>(
+        "SELECT deleted_at FROM notebook_tombstones WHERE owner_id = $1 AND client_id = $2 FOR UPDATE",
+        [request.user.sub, request.params.notebookId]
+      );
+      if (tombstone.rowCount && !force) {
+        await client.query("ROLLBACK");
+        return reply.code(410).send({
+          error: "Ce cahier a été supprimé dans le cloud.",
+          deletedAt: new Date(tombstone.rows[0]!.deleted_at).getTime()
+        });
+      }
       if (
-        !request.body.force &&
+        !force &&
         current?.snapshot &&
         current.snapshot.notebook.updatedAt > document.notebook.updatedAt
       ) {
@@ -592,6 +621,10 @@ app.put<{ Params: { notebookId: string }; Body: { document: unknown; force?: boo
         "INSERT INTO documents (notebook_id, snapshot, updated_at) VALUES ($1, $2, now()) ON CONFLICT (notebook_id) DO UPDATE SET snapshot = EXCLUDED.snapshot, updated_at = now()",
         [id, document]
       );
+      await client.query(
+        "DELETE FROM notebook_tombstones WHERE owner_id = $1 AND client_id = $2",
+        [request.user.sub, request.params.notebookId]
+      );
       await client.query("COMMIT");
       return { document };
     } catch (error) {
@@ -600,6 +633,65 @@ app.put<{ Params: { notebookId: string }; Body: { document: unknown; force?: boo
     } finally {
       client.release();
     }
+  }
+);
+app.delete<{ Params: { notebookId: string }; Body: NotebookDeletionRequest }>(
+  "/cloud/notebooks/:notebookId",
+  { preHandler: accessOnly },
+  async (request, reply) => {
+    const requestedDeletedAt = request.body?.deletedAt;
+    const deletedAt = new Date(
+      typeof requestedDeletedAt === "number" && Number.isFinite(requestedDeletedAt)
+        ? Math.min(Date.now(), Math.max(0, requestedDeletedAt))
+        : Date.now()
+    );
+    const client = await pool.connect();
+    const objectKeys: string[] = [];
+    try {
+      await client.query("BEGIN");
+      await lockNotebook(client, request.params.notebookId);
+      const existing = await client.query<{ id: string; owner_id: string }>(
+        "SELECT id, owner_id FROM notebooks WHERE client_id = $1 FOR UPDATE",
+        [request.params.notebookId]
+      );
+      const current = existing.rows[0];
+      if (current && current.owner_id !== request.user.sub) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ error: "Cahier introuvable." });
+      }
+      if (current) {
+        const assets = await client.query<{ object_key: string }>(
+          "SELECT object_key FROM assets WHERE notebook_id = $1",
+          [current.id]
+        );
+        for (const asset of assets.rows) {
+          objectKeys.push(asset.object_key);
+          await client.query(
+            "INSERT INTO pending_asset_deletions (object_key) VALUES ($1) ON CONFLICT (object_key) DO NOTHING",
+            [asset.object_key]
+          );
+        }
+        await client.query("DELETE FROM notebooks WHERE id = $1", [current.id]);
+      }
+      await client.query(
+        "INSERT INTO notebook_tombstones (id, owner_id, client_id, deleted_at) VALUES ($1, $2, $3, $4) ON CONFLICT (owner_id, client_id) DO UPDATE SET deleted_at = GREATEST(notebook_tombstones.deleted_at, EXCLUDED.deleted_at)",
+        [crypto.randomUUID(), request.user.sub, request.params.notebookId, deletedAt]
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      return databaseFailure(reply, error);
+    } finally {
+      client.release();
+    }
+
+    const room = sessions.get(request.params.notebookId);
+    if (room) {
+      for (const socket of room) socket.close(1001);
+      sessions.delete(request.params.notebookId);
+    }
+    if (objectKeys.length) await drainPendingAssetDeletions(objectKeys);
+    return reply.code(204).send();
   }
 );
 app.put<{ Params: { notebookId: string; assetId: string }; Body: Buffer }>(
@@ -725,6 +817,41 @@ async function ensureSchema() {
   await pool.query(
     "CREATE UNIQUE INDEX IF NOT EXISTS assets_notebook_client_id_key ON assets (notebook_id, client_id)"
   );
+  await pool.query(
+    "CREATE TABLE IF NOT EXISTS notebook_tombstones (id UUID PRIMARY KEY, owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, client_id TEXT NOT NULL, deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (owner_id, client_id))"
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS notebook_tombstones_owner_deleted_idx ON notebook_tombstones (owner_id, deleted_at DESC)"
+  );
+  await pool.query(
+    "CREATE TABLE IF NOT EXISTS pending_asset_deletions (object_key TEXT PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+  );
+}
+async function lockNotebook(client: { query: Pool["query"] }, notebookId: string) {
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+    `notylo-notebook:${notebookId}`
+  ]);
+}
+async function drainPendingAssetDeletions(objectKeys?: readonly string[]) {
+  const pending = objectKeys?.length
+    ? await pool.query<{ object_key: string }>(
+        "SELECT object_key FROM pending_asset_deletions WHERE object_key = ANY($1::text[])",
+        [[...objectKeys]]
+      )
+    : await pool.query<{ object_key: string }>(
+        "SELECT object_key FROM pending_asset_deletions ORDER BY created_at LIMIT 200"
+      );
+
+  for (const item of pending.rows) {
+    try {
+      await storage.send(new DeleteObjectCommand({ Bucket: bucket, Key: item.object_key }));
+      await pool.query("DELETE FROM pending_asset_deletions WHERE object_key = $1", [
+        item.object_key
+      ]);
+    } catch (error) {
+      app.log.warn(error, `Deferred asset deletion failed for ${item.object_key}`);
+    }
+  }
 }
 let bucketReady: Promise<void> | undefined;
 function ensureBucket() {

@@ -202,6 +202,7 @@ export const cloudApi = {
         mode: "book" | "whiteboard";
         updatedAt: number;
       }[];
+      deletedNotebooks?: readonly { id: string; deletedAt: number }[];
     }>("/cloud/notebooks", { headers: bearer(token) }),
   load: (token: string, id: string) =>
     request<{ document: unknown }>(`/cloud/notebooks/${encodeURIComponent(id)}`, {
@@ -212,6 +213,12 @@ export const cloudApi = {
       method: "PUT",
       headers: { ...bearer(token), "Content-Type": "application/json" },
       body: JSON.stringify({ document, force })
+    }),
+  deleteNotebook: (token: string, id: string, deletedAt: number) =>
+    request<void>(`/cloud/notebooks/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { ...bearer(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ deletedAt })
     }),
   uploadAsset: (token: string, notebookId: string, assetId: string, blob: Blob) =>
     request<void>(

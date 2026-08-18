@@ -29,7 +29,7 @@ export interface Preference {
 export interface SyncQueueItem {
   readonly id: string;
   readonly notebookId: string;
-  readonly type: "document" | "asset";
+  readonly type: "document" | "asset" | "delete";
   readonly payload: unknown;
   readonly createdAt: number;
 }

@@ -53,6 +53,19 @@ CREATE TABLE IF NOT EXISTS assets (
   UNIQUE (notebook_id, hash)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS assets_notebook_client_id_key ON assets (notebook_id, client_id);
+CREATE TABLE IF NOT EXISTS notebook_tombstones (
+  id UUID PRIMARY KEY,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  client_id TEXT NOT NULL,
+  deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (owner_id, client_id)
+);
+CREATE INDEX IF NOT EXISTS notebook_tombstones_owner_deleted_idx
+  ON notebook_tombstones (owner_id, deleted_at DESC);
+CREATE TABLE IF NOT EXISTS pending_asset_deletions (
+  object_key TEXT PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS devices (
   id UUID PRIMARY KEY,
   owner_id UUID REFERENCES users(id),

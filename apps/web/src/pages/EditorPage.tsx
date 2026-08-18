@@ -79,7 +79,7 @@ function LoadedEditor({ initial }: { readonly initial: NotebookDocument }) {
     try {
       await uploadDocument(accessToken, latestDocument.current);
     } catch (error) {
-      if (error instanceof ApiError && error.status === 409) {
+      if (error instanceof ApiError && (error.status === 409 || error.status === 410)) {
         conflictBlocked.current = true;
       } else if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
         void refreshSession();

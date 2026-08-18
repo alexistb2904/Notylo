@@ -33,6 +33,7 @@ Notylo deliberately separates **local save** from **cloud synchronization**.
 5. If only one side changed, the newer side is applied automatically.
 6. If both local and cloud copies changed since the last checkpoint, Notylo keeps both copies intact and asks which one to keep.
 7. If the server or network is unavailable, editing continues locally and cloud upload is retried after connectivity returns.
+8. Notebook deletions are applied locally immediately and stored as durable tombstones until the cloud confirms them.
 
 Attachments are stored locally as blobs and remotely in MinIO. Their hashes are checkpointed so an unchanged attachment is not uploaded on every notebook save.
 
@@ -486,13 +487,29 @@ Return to the notebook library. Notylo displays the conflict dialog and offers:
 - **Garder cette copie** — upload the local copy and replace the cloud snapshot;
 - **Garder le cloud** — download the remote copy onto this device.
 
-## Current V1 limitation: notebook deletion
+## Offline notebook deletion
 
-Creation and modification are synchronized. Per-notebook deletion is still local-only in the current API and is planned for the next cloud iteration.
+Notebook deletion is local-first too:
 
-Until the server-side delete route is added, deleting a local notebook does not guarantee removal of an already synchronized remote copy. Full account deletion does remove the account notebooks/assets server-side.
+1. the notebook disappears from IndexedDB immediately;
+2. the same IndexedDB transaction creates a durable `delete` item in the synchronization queue;
+3. if the cloud is reachable, the delete is sent immediately;
+4. otherwise the queue survives reloads and the delete is retried at the next reconciliation;
+5. the API stores a PostgreSQL tombstone so another device cannot resurrect an old copy simply by uploading it again;
+6. the tombstone is removed only when the notebook is explicitly restored.
 
-This limitation is intentionally documented rather than hiding destructive behavior behind an unreliable client workaround.
+The API also queues MinIO object deletions server-side. If object storage is temporarily unavailable, binary cleanup remains pending instead of being silently forgotten.
+
+### Deletion versus offline edits on another device
+
+A remote deletion does **not** silently destroy unsynchronized edits.
+
+If another device has not changed the notebook since its last cloud checkpoint, the remote tombstone removes that local copy automatically. If that device contains newer local changes, Notylo shows a conflict with two choices:
+
+- **Restaurer le cahier** — recreate the notebook in the cloud from the modified local copy and clear the server tombstone;
+- **Accepter la suppression** — delete the modified local copy too.
+
+This prevents both accidental resurrection and silent loss of offline work.
 
 ---
 
