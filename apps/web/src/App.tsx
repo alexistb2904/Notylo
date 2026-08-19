@@ -7,6 +7,7 @@ import { ProfilePage } from "./pages/ProfilePage";
 import { AuthDialog } from "./components/AuthDialog";
 import { useAuth } from "./lib/auth";
 import { PublicPage } from "./pages/PublicPage";
+import { t } from "./i18n";
 
 const authRequired = ["true", "1", "yes"].includes(
   String(import.meta.env.VITE_REQUIRE_AUTH).toLowerCase()
@@ -40,7 +41,7 @@ function AccessGate({ children }: { readonly children: React.ReactNode }) {
       return (
         <main className="loading-state" aria-live="polite">
           <span className="brand-mark">P</span>
-          <p>Vérification de l’accès…</p>
+          <p>{t("app.verifyingAccess")}</p>
         </main>
       );
     }
@@ -53,9 +54,9 @@ function AccessGate({ children }: { readonly children: React.ReactNode }) {
     <main className="access-gate">
       <div className="access-gate-intro">
         <span className="brand-mark">P</span>
-        <p className="eyebrow">Espace privé</p>
-        <h1>Connexion requise</h1>
-        <p>Connectez-vous pour ouvrir l’espace de travail et utiliser ses ressources.</p>
+        <p className="eyebrow">{t("app.privateSpace")}</p>
+        <h1>{t("app.loginRequired")}</h1>
+        <p>{t("app.loginRequiredDescription")}</p>
       </div>
       <AuthDialog required onClose={() => undefined} />
     </main>
