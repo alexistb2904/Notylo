@@ -13,7 +13,21 @@ async function drawStroke(page: Page, yOffset: number) {
   const box = await paper.boundingBox();
   expect(box).not.toBeNull();
   if (!box) return;
-  const start = { x: box.x + 100, y: box.y + Math.min(box.height - 40, 100 + yOffset) };
+  const viewport = page.viewportSize() ?? { width: 1280, height: 720 };
+  const visibleLeft = Math.max(0, box.x);
+  const visibleRight = Math.min(viewport.width, box.x + box.width);
+  const visibleTop = Math.max(0, box.y);
+  const visibleBottom = Math.min(viewport.height, box.y + box.height);
+  expect(visibleRight - visibleLeft).toBeGreaterThan(220);
+  expect(visibleBottom - visibleTop).toBeGreaterThan(90);
+
+  const start = {
+    x: Math.min(visibleRight - 190, visibleLeft + 100),
+    y: Math.max(
+      visibleTop + 35,
+      Math.min(visibleBottom - 35, box.y + 100 + yOffset)
+    )
+  };
   const target = await page.evaluate(({ x, y }) => {
     const element = document.elementFromPoint(x, y);
     return {
@@ -33,8 +47,8 @@ async function drawStroke(page: Page, yOffset: number) {
 
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
-  await page.mouse.move(box.x + 170, start.y + 18, { steps: 7 });
-  await page.mouse.move(box.x + 250, start.y - 8, { steps: 7 });
+  await page.mouse.move(start.x + 70, start.y + 18, { steps: 7 });
+  await page.mouse.move(start.x + 150, start.y - 8, { steps: 7 });
   await page.mouse.up();
 }
 
