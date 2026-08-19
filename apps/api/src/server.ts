@@ -39,7 +39,7 @@ type PasskeyVerification = { response: RegistrationResponseJSON };
 type PasskeyLoginOptionsRequest = { email: string };
 type PasskeyLoginVerification = { email: string; response: AuthenticationResponseJSON };
 type AccountDeletion = { password: string; confirmation: string };
-type NotebookDeletionRequest = { deletedAt?: number };
+type NotebookDeletionRequest = { deletedAt?: number; baseRevision?: number; force?: boolean };
 type StoredPasskey = {
   id: string;
   user_id: string;
@@ -96,7 +96,12 @@ const storage = new S3Client({
 });
 const sessions = new Map<string, Set<RealtimeSocket>>();
 
-await app.register(cors, { origin: corsOrigins.length ? corsOrigins : false, credentials: false });
+await app.register(cors, {
+  origin: corsOrigins.length ? corsOrigins : false,
+  credentials: false,
+  methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Authorization", "Content-Type", "Accept"]
+});
 await app.register(jwt, {
   secret: jwtSecret ?? "development-only-secret-replace-before-deploying"
 });
@@ -114,7 +119,7 @@ void drainPendingAssetDeletions().catch((error) =>
   app.log.warn(error, "Deferred asset cleanup could not start")
 );
 
-app.get("/health", async () => {
+app.get("/health", async (_request, reply) => {
   try {
     await pool.query("SELECT 1");
     return {
@@ -125,12 +130,12 @@ app.get("/health", async () => {
     };
   } catch (error) {
     app.log.error(error, "Database health check failed");
-    return {
-      status: "degraded",
+    return reply.code(503).send({
+      status: "degraded" as const,
       service: "notylo-api",
       database: "unavailable",
       now: new Date().toISOString()
-    };
+    });
   }
 });
 app.get("/auth/config", async () => ({ registrationEnabled }));
@@ -519,8 +524,9 @@ app.get("/cloud/notebooks", { preHandler: accessOnly }, async (request, reply) =
         title: string;
         mode: "book" | "whiteboard";
         updated_at: number;
+        revision: string | number;
       }>(
-        "SELECT n.client_id, n.title, n.mode, (d.snapshot->'notebook'->>'updatedAt')::bigint AS updated_at FROM notebooks n JOIN documents d ON d.notebook_id = n.id WHERE n.owner_id = $1 ORDER BY d.updated_at DESC",
+        "SELECT n.client_id, n.title, n.mode, (d.snapshot->'notebook'->>'updatedAt')::bigint AS updated_at, d.revision FROM notebooks n JOIN documents d ON d.notebook_id = n.id WHERE n.owner_id = $1 ORDER BY d.updated_at DESC",
         [request.user.sub]
       ),
       pool.query<{ client_id: string; deleted_at: Date | string }>(
@@ -533,7 +539,8 @@ app.get("/cloud/notebooks", { preHandler: accessOnly }, async (request, reply) =
         id: row.client_id,
         title: row.title,
         mode: row.mode,
-        updatedAt: Number(row.updated_at)
+        updatedAt: Number(row.updated_at),
+        revision: Number(row.revision)
       })),
       deletedNotebooks: deleted.rows.map((row) => ({
         id: row.client_id,
@@ -544,89 +551,47 @@ app.get("/cloud/notebooks", { preHandler: accessOnly }, async (request, reply) =
     return databaseFailure(reply, error);
   }
 });
-app.get<{ Params: { notebookId: string } }>(
-  "/cloud/notebooks/:notebookId",
-  { preHandler: accessOnly },
-  async (request, reply) => {
-    const cloud = await findCloudDocument(request.params.notebookId, request.user.sub);
-    if (!cloud) return reply.code(404).send({ error: "Cahier introuvable." });
-    return { document: cloud.snapshot };
-  }
-);
-app.put<{ Params: { notebookId: string }; Body: { document: unknown; force?: boolean } }>(
-  "/cloud/notebooks/:notebookId",
+app.post<{ Body: { document: unknown } }>(
+  "/cloud/notebooks",
   { preHandler: accessOnly },
   async (request, reply) => {
     const document = request.body?.document;
-    if (!isCloudDocument(document) || document.notebook.id !== request.params.notebookId)
-      return reply.code(400).send({ error: "Document invalide." });
+    if (!isCloudDocument(document)) return reply.code(400).send({ error: "Document invalide." });
+
     const client = await pool.connect();
-    const force = request.body?.force === true;
     try {
       await client.query("BEGIN");
-      await lockNotebook(client, request.params.notebookId);
-      const existing = await client.query<{
-        id: string;
-        owner_id: string;
-        snapshot: CloudDocument;
-      }>(
-        "SELECT n.id, n.owner_id, d.snapshot FROM notebooks n LEFT JOIN documents d ON d.notebook_id = n.id WHERE n.client_id = $1 FOR UPDATE OF n",
-        [request.params.notebookId]
+      await lockNotebook(client, document.notebook.id);
+      const existing = await client.query<{ owner_id: string }>(
+        "SELECT owner_id FROM notebooks WHERE client_id = $1 FOR UPDATE",
+        [document.notebook.id]
       );
-      const current = existing.rows[0];
-      if (current && current.owner_id !== request.user.sub) {
+      if (existing.rowCount) {
         await client.query("ROLLBACK");
-        return reply.code(404).send({ error: "Cahier introuvable." });
+        return reply.code(409).send({ error: "Ce cahier existe déjà." });
       }
-      const tombstone = await client.query<{ deleted_at: Date | string }>(
-        "SELECT deleted_at FROM notebook_tombstones WHERE owner_id = $1 AND client_id = $2 FOR UPDATE",
-        [request.user.sub, request.params.notebookId]
-      );
-      if (tombstone.rowCount && !force) {
-        await client.query("ROLLBACK");
-        return reply.code(410).send({
-          error: "Ce cahier a été supprimé dans le cloud.",
-          deletedAt: new Date(tombstone.rows[0]!.deleted_at).getTime()
-        });
-      }
-      if (
-        !force &&
-        current?.snapshot &&
-        current.snapshot.notebook.updatedAt > document.notebook.updatedAt
-      ) {
-        await client.query("ROLLBACK");
-        return reply.code(409).send({
-          error: "Une version plus récente existe dans le cloud.",
-          document: current.snapshot
-        });
-      }
-      const id = current?.id ?? crypto.randomUUID();
-      if (current)
-        await client.query(
-          "UPDATE notebooks SET title = $1, mode = $2, updated_at = now() WHERE id = $3",
-          [document.notebook.title, document.notebook.mode, id]
-        );
-      else
-        await client.query(
-          "INSERT INTO notebooks (id, client_id, owner_id, title, mode) VALUES ($1, $2, $3, $4, $5)",
-          [
-            id,
-            request.params.notebookId,
-            request.user.sub,
-            document.notebook.title,
-            document.notebook.mode
-          ]
-        );
+
+      const id = crypto.randomUUID();
       await client.query(
-        "INSERT INTO documents (notebook_id, snapshot, updated_at) VALUES ($1, $2, now()) ON CONFLICT (notebook_id) DO UPDATE SET snapshot = EXCLUDED.snapshot, updated_at = now()",
+        "INSERT INTO notebooks (id, client_id, owner_id, title, mode) VALUES ($1, $2, $3, $4, $5)",
+        [
+          id,
+          document.notebook.id,
+          request.user.sub,
+          document.notebook.title,
+          document.notebook.mode
+        ]
+      );
+      await client.query(
+        "INSERT INTO documents (notebook_id, snapshot, revision, updated_at) VALUES ($1, $2, 1, now())",
         [id, document]
       );
-      await client.query(
-        "DELETE FROM notebook_tombstones WHERE owner_id = $1 AND client_id = $2",
-        [request.user.sub, request.params.notebookId]
-      );
+      await client.query("DELETE FROM notebook_tombstones WHERE owner_id = $1 AND client_id = $2", [
+        request.user.sub,
+        document.notebook.id
+      ]);
       await client.query("COMMIT");
-      return { document };
+      return reply.code(201).send({ document, revision: 1 });
     } catch (error) {
       await client.query("ROLLBACK");
       return databaseFailure(reply, error);
@@ -635,6 +600,107 @@ app.put<{ Params: { notebookId: string }; Body: { document: unknown; force?: boo
     }
   }
 );
+app.get<{ Params: { notebookId: string } }>(
+  "/cloud/notebooks/:notebookId",
+  { preHandler: accessOnly },
+  async (request, reply) => {
+    const cloud = await findCloudDocument(request.params.notebookId, request.user.sub);
+    if (!cloud) {
+      const tombstone = await pool.query<{ deleted_at: Date | string }>(
+        "SELECT deleted_at FROM notebook_tombstones WHERE owner_id = $1 AND client_id = $2",
+        [request.user.sub, request.params.notebookId]
+      );
+      if (tombstone.rowCount)
+        return reply.code(410).send({
+          error: "Ce cahier a été supprimé dans le cloud.",
+          deletedAt: new Date(tombstone.rows[0]!.deleted_at).getTime()
+        });
+      return reply.code(404).send({ error: "Cahier introuvable." });
+    }
+    return { document: cloud.snapshot, revision: Number(cloud.revision) };
+  }
+);
+app.put<{
+  Params: { notebookId: string };
+  Body: { document: unknown; baseRevision?: number; force?: boolean };
+}>("/cloud/notebooks/:notebookId", { preHandler: accessOnly }, async (request, reply) => {
+  const document = request.body?.document;
+  if (!isCloudDocument(document) || document.notebook.id !== request.params.notebookId)
+    return reply.code(400).send({ error: "Document invalide." });
+  const client = await pool.connect();
+  const force = request.body?.force === true;
+  const baseRevision = validRevision(request.body?.baseRevision) ? request.body.baseRevision : 0;
+  try {
+    await client.query("BEGIN");
+    await lockNotebook(client, request.params.notebookId);
+    const existing = await client.query<{
+      id: string;
+      owner_id: string;
+      snapshot: CloudDocument;
+      revision: string | number;
+    }>(
+      "SELECT n.id, n.owner_id, d.snapshot, d.revision FROM notebooks n LEFT JOIN documents d ON d.notebook_id = n.id WHERE n.client_id = $1 FOR UPDATE OF n",
+      [request.params.notebookId]
+    );
+    const current = existing.rows[0];
+    if (current && current.owner_id !== request.user.sub) {
+      await client.query("ROLLBACK");
+      return reply.code(404).send({ error: "Cahier introuvable." });
+    }
+    const tombstone = await client.query<{ deleted_at: Date | string }>(
+      "SELECT deleted_at FROM notebook_tombstones WHERE owner_id = $1 AND client_id = $2 FOR UPDATE",
+      [request.user.sub, request.params.notebookId]
+    );
+    if (tombstone.rowCount && !force) {
+      await client.query("ROLLBACK");
+      return reply.code(410).send({
+        error: "Ce cahier a été supprimé dans le cloud.",
+        deletedAt: new Date(tombstone.rows[0]!.deleted_at).getTime()
+      });
+    }
+    if (!force && current?.snapshot && Number(current.revision) !== baseRevision) {
+      await client.query("ROLLBACK");
+      return reply.code(409).send({
+        error: "Une version plus récente existe dans le cloud.",
+        document: current.snapshot,
+        revision: Number(current.revision)
+      });
+    }
+    const id = current?.id ?? crypto.randomUUID();
+    const revision = current ? Number(current.revision) + 1 : 1;
+    if (current)
+      await client.query(
+        "UPDATE notebooks SET title = $1, mode = $2, updated_at = now() WHERE id = $3",
+        [document.notebook.title, document.notebook.mode, id]
+      );
+    else
+      await client.query(
+        "INSERT INTO notebooks (id, client_id, owner_id, title, mode) VALUES ($1, $2, $3, $4, $5)",
+        [
+          id,
+          request.params.notebookId,
+          request.user.sub,
+          document.notebook.title,
+          document.notebook.mode
+        ]
+      );
+    await client.query(
+      "INSERT INTO documents (notebook_id, snapshot, revision, updated_at) VALUES ($1, $2, $3, now()) ON CONFLICT (notebook_id) DO UPDATE SET snapshot = EXCLUDED.snapshot, revision = EXCLUDED.revision, updated_at = now()",
+      [id, document, revision]
+    );
+    await client.query("DELETE FROM notebook_tombstones WHERE owner_id = $1 AND client_id = $2", [
+      request.user.sub,
+      request.params.notebookId
+    ]);
+    await client.query("COMMIT");
+    return reply.code(current ? 200 : 201).send({ document, revision });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    return databaseFailure(reply, error);
+  } finally {
+    client.release();
+  }
+});
 app.delete<{ Params: { notebookId: string }; Body: NotebookDeletionRequest }>(
   "/cloud/notebooks/:notebookId",
   { preHandler: accessOnly },
@@ -647,17 +713,32 @@ app.delete<{ Params: { notebookId: string }; Body: NotebookDeletionRequest }>(
     );
     const client = await pool.connect();
     const objectKeys: string[] = [];
+    const force = request.body?.force === true;
+    const baseRevision = validRevision(request.body?.baseRevision) ? request.body.baseRevision : 0;
     try {
       await client.query("BEGIN");
       await lockNotebook(client, request.params.notebookId);
-      const existing = await client.query<{ id: string; owner_id: string }>(
-        "SELECT id, owner_id FROM notebooks WHERE client_id = $1 FOR UPDATE",
+      const existing = await client.query<{
+        id: string;
+        owner_id: string;
+        snapshot: CloudDocument;
+        revision: string | number;
+      }>(
+        "SELECT n.id, n.owner_id, d.snapshot, d.revision FROM notebooks n JOIN documents d ON d.notebook_id = n.id WHERE n.client_id = $1 FOR UPDATE OF n",
         [request.params.notebookId]
       );
       const current = existing.rows[0];
       if (current && current.owner_id !== request.user.sub) {
         await client.query("ROLLBACK");
         return reply.code(404).send({ error: "Cahier introuvable." });
+      }
+      if (current && !force && Number(current.revision) !== baseRevision) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          error: "Une version plus récente existe dans le cloud.",
+          document: current.snapshot,
+          revision: Number(current.revision)
+        });
       }
       if (current) {
         const assets = await client.query<{ object_key: string }>(
@@ -780,8 +861,12 @@ app.get("/sync/:notebookId", { websocket: true }, async (socket, request) => {
 });
 
 async function findCloudDocument(clientId: string, ownerId: string) {
-  const result = await pool.query<{ id: string; snapshot: CloudDocument }>(
-    "SELECT n.id, d.snapshot FROM notebooks n JOIN documents d ON d.notebook_id = n.id WHERE n.client_id = $1 AND n.owner_id = $2",
+  const result = await pool.query<{
+    id: string;
+    snapshot: CloudDocument;
+    revision: string | number;
+  }>(
+    "SELECT n.id, d.snapshot, d.revision FROM notebooks n JOIN documents d ON d.notebook_id = n.id WHERE n.client_id = $1 AND n.owner_id = $2",
     [clientId, ownerId]
   );
   return result.rows[0];
@@ -825,6 +910,9 @@ async function ensureSchema() {
   );
   await pool.query(
     "CREATE TABLE IF NOT EXISTS pending_asset_deletions (object_key TEXT PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+  );
+  await pool.query(
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 1"
   );
 }
 async function lockNotebook(client: { query: Pool["query"] }, notebookId: string) {
@@ -932,6 +1020,9 @@ function isCloudDocument(value: unknown): value is CloudDocument {
     Number.isFinite(document.notebook.updatedAt) &&
     Array.isArray(document.assets)
   );
+}
+function validRevision(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 function displayNameFromEmail(email: string) {
   return email.split("@", 1)[0]!.slice(0, 80) || "Utilisateur";

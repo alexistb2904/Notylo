@@ -61,24 +61,6 @@ services:
       timeout: 5s
       retries: 10
 
-  ocr:
-    build: ./services/ocr
-    environment:
-      OCR_TEXT_WORKERS: ${OCR_TEXT_WORKERS:-3}
-      OCR_MATH_WORKERS: ${OCR_MATH_WORKERS:-1}
-    ports: ["8001:8001"]
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)"
-        ]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-
 volumes:
   postgres_data:
   minio_data:

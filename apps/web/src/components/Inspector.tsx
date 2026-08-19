@@ -1,4 +1,5 @@
 import type { InkDynamics, PageBackground } from "@notylo/document-model";
+import type { OcrMode } from "../lib/ocr";
 import type { Tool } from "./editor/types";
 import {
   Calculator,
@@ -35,7 +36,9 @@ export function Inspector({
   onWhiteboardBackground,
   onPageGap,
   onAutoCalculate,
-  onOcr
+  onOcr,
+  ocrBusy,
+  ocrStatus
 }: {
   readonly tool: Tool;
   readonly color: string;
@@ -59,7 +62,9 @@ export function Inspector({
   onWhiteboardBackground(value: PageBackground): void;
   onPageGap(value: number): void;
   onAutoCalculate(value: boolean): void;
-  onOcr(): void;
+  onOcr(mode: OcrMode): void;
+  readonly ocrBusy: boolean;
+  readonly ocrStatus: string | undefined;
 }) {
   const background = whiteboardBackground ?? {
     kind: "dots" as const,
@@ -331,12 +336,23 @@ export function Inspector({
         aria-labelledby="recognition-settings"
       >
         <h3 id="recognition-settings">Reconnaissance</h3>
-        <button className="outline-action" onClick={onOcr}>
-          <ScanText size={16} /> Lire la sélection
-        </button>
+        <div className="recognition-actions">
+          <button className="outline-action" disabled={ocrBusy} onClick={() => onOcr("text")}>
+            <ScanText size={16} /> Lire le texte
+          </button>
+          <button className="outline-action" disabled={ocrBusy} onClick={() => onOcr("math")}>
+            <Calculator size={16} /> Convertir en maths
+          </button>
+        </div>
         <p className="inspector-note">
-          <CircleHelp size={13} /> L’OCR utilise votre serveur privé lorsqu’il est configuré.
+          <CircleHelp size={13} /> OCR local dans votre navigateur, optimisé pour les notes et les
+          expressions mathématiques.
         </p>
+        {ocrStatus && (
+          <p className="recognition-status" role="status">
+            {ocrStatus}
+          </p>
+        )}
       </section>
     </aside>
   );

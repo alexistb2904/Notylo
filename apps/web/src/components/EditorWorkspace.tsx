@@ -66,6 +66,7 @@ import {
   recognizeSelected,
   sha256
 } from "./editor/documentHelpers";
+import type { OcrMode } from "../lib/ocr";
 import {
   readStoredBoolean,
   readStoredNumber,
@@ -151,6 +152,8 @@ export function EditorWorkspace(props: Props) {
   const [lasso, setLasso] = useState<readonly Point[]>([]);
   const [dragOffset, setDragOffset] = useState<Point>({ x: 0, y: 0 });
   const [showInspector, setShowInspector] = useState(false);
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrStatus, setOcrStatus] = useState<string>();
   const [showExport, setShowExport] = useState(false);
   const [canvasActive, setCanvasActive] = useState(false);
   const draftRef = useRef<DraftInk | undefined>(undefined);
@@ -960,6 +963,23 @@ export function EditorWorkspace(props: Props) {
     label = "Modifier l’objet"
   ) => props.onUpdate([before], [after], label);
   const selectedObjects = scopedObjects.filter((object) => selectedIds.includes(object.id));
+  const runOcr = async (mode: OcrMode) => {
+    if (ocrBusy) return;
+    setOcrBusy(true);
+    setOcrStatus(mode === "math" ? "Préparation de la formule…" : "Préparation du texte…");
+    try {
+      const confidence = await recognizeSelected(selectedObjects, props.onAdd, mode);
+      setOcrStatus(
+        mode === "math"
+          ? `Formule ajoutée — confiance estimée à ${confidence} %.`
+          : `Texte ajouté — confiance estimée à ${confidence} %.`
+      );
+    } catch (error) {
+      setOcrStatus(error instanceof Error ? error.message : "La reconnaissance a échoué.");
+    } finally {
+      setOcrBusy(false);
+    }
+  };
   return (
     <section className="editor-shell">
       <EditorHeader
@@ -1266,7 +1286,9 @@ export function EditorWorkspace(props: Props) {
                 }
               }))
             }
-            onOcr={() => void recognizeSelected(selectedObjects, props.onAdd)}
+            onOcr={(mode) => void runOcr(mode)}
+            ocrBusy={ocrBusy}
+            ocrStatus={ocrStatus}
           />
         )}
       </div>

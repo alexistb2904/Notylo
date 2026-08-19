@@ -1,15 +1,17 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ChevronRight,
   FileText,
   Gauge,
   Grid2X2,
+  Menu,
   MoreHorizontal,
   PenLine,
   Plus,
   Search,
-  Upload
+  Upload,
+  X
 } from "lucide-react";
 import {
   createId,
@@ -24,7 +26,12 @@ import { webPlatform } from "../lib/platform";
 import { ExportDialog } from "../components/ExportDialog";
 import { AuthDialog } from "../components/AuthDialog";
 import { useAuth } from "../lib/auth";
-import { reconcileCloud, resolveConflict, type SyncConflict } from "../lib/cloud";
+import {
+  createCloudDocument,
+  reconcileCloud,
+  resolveConflict,
+  type SyncConflict
+} from "../lib/cloud";
 
 const repository = new NotebookRepository();
 
@@ -46,35 +53,84 @@ export function HomePage() {
   const [cloudStatus, setCloudStatus] = useState<"idle" | "syncing" | "conflict" | "error">("idle");
   const [conflicts, setConflicts] = useState<readonly SyncConflict[]>([]);
   const [resolvingConflict, setResolvingConflict] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [creationError, setCreationError] = useState<string>();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = async () => setNotebooks(await repository.list());
   useEffect(() => {
     void refresh();
   }, []);
   useEffect(() => {
-    if (!accessToken) return;
-    let active = true;
-    setCloudStatus("syncing");
-    void reconcileCloud(accessToken)
-      .then(async (detectedConflicts) => {
-        if (!active) return;
+    const focusSearch = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "k") return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+      ) {
+        return;
+      }
+      event.preventDefault();
+      searchInputRef.current?.focus();
+    };
+    window.addEventListener("keydown", focusSearch);
+    return () => window.removeEventListener("keydown", focusSearch);
+  }, []);
+  const synchronizeCloud = useCallback(
+    async (canUpdate: () => boolean = () => true) => {
+      if (!accessToken || !user) return false;
+
+      if (canUpdate()) setCloudStatus("syncing");
+      try {
+        const detectedConflicts = await reconcileCloud(accessToken, user.id);
         await refresh();
-        if (active) {
-          setConflicts(detectedConflicts);
-          setCloudStatus(detectedConflicts.length ? "conflict" : "idle");
-        }
-      })
-      .catch(() => active && setCloudStatus("error"));
+        if (!canUpdate()) return false;
+        setConflicts(detectedConflicts);
+        setCloudStatus(detectedConflicts.length ? "conflict" : "idle");
+        return true;
+      } catch {
+        if (canUpdate()) setCloudStatus("error");
+        return false;
+      }
+    },
+    [accessToken, user]
+  );
+
+  useEffect(() => {
+    if (!accessToken || !user) return;
+    let active = true;
+    let syncTimer: number | undefined;
+
+    const run = async () => {
+      await synchronizeCloud(() => active);
+      if (active)
+        syncTimer = window.setTimeout(run, document.visibilityState === "visible" ? 5_000 : 20_000);
+    };
+    const refreshOnReturn = () => {
+      if (document.visibilityState !== "visible") return;
+      window.clearTimeout(syncTimer);
+      void run();
+    };
+
+    void run();
+    window.addEventListener("online", refreshOnReturn);
+    document.addEventListener("visibilitychange", refreshOnReturn);
     return () => {
       active = false;
+      if (syncTimer) window.clearTimeout(syncTimer);
+      window.removeEventListener("online", refreshOnReturn);
+      document.removeEventListener("visibilitychange", refreshOnReturn);
     };
-  }, [accessToken]);
+  }, [accessToken, user, synchronizeCloud]);
   const resolveCurrentConflict = async (keep: "local" | "cloud") => {
     const conflict = conflicts[0];
-    if (!accessToken || !conflict) return;
+    if (!accessToken || !user || !conflict) return;
     setResolvingConflict(true);
     try {
-      await resolveConflict(accessToken, conflict, keep);
+      await resolveConflict(accessToken, conflict, keep, user.id);
       const remaining = conflicts.slice(1);
       setConflicts(remaining);
       await refresh();
@@ -86,13 +142,31 @@ export function HomePage() {
     }
   };
   const create = async () => {
+    if (creating) return;
     const document = createNotebook({
       title: title || "Nouveau cahier",
       mode,
       background: { kind: background, color: "#ffffff", lineColor: "#dedede" }
     });
-    await repository.save(document);
-    navigate(`/notebook/${document.notebook.id}`);
+    setCreating(true);
+    setCreationError(undefined);
+    try {
+      await repository.save(document);
+      // Saving locally first means a temporary cloud failure never blocks work.
+      // The editor retries this write as soon as it opens or reconnects.
+      if (accessToken && user && navigator.onLine) {
+        try {
+          await createCloudDocument(accessToken, user.id, document);
+        } catch {
+          setCloudStatus("error");
+        }
+      }
+      navigate(`/notebook/${document.notebook.id}`);
+    } catch (error) {
+      setCreationError(error instanceof Error ? error.message : "Le cahier n’a pas pu être créé.");
+    } finally {
+      setCreating(false);
+    }
   };
   const importNotezip = async () => {
     try {
@@ -179,9 +253,9 @@ export function HomePage() {
     setConfirmDelete(false);
     setNotebookMenu(undefined);
 
-    if (accessToken && navigator.onLine) {
+    if (accessToken && user && navigator.onLine) {
       setCloudStatus("syncing");
-      void reconcileCloud(accessToken)
+      void reconcileCloud(accessToken, user.id)
         .then(async (detectedConflicts) => {
           await refresh();
           setConflicts(detectedConflicts);
@@ -195,48 +269,82 @@ export function HomePage() {
     day: "numeric",
     month: "long"
   }).format(new Date());
+  const normalizedQuery = searchQuery
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("fr-FR");
+  const visibleNotebooks = normalizedQuery
+    ? notebooks.filter((notebook) =>
+        notebook.title
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLocaleLowerCase("fr-FR")
+          .includes(normalizedQuery)
+      )
+    : notebooks;
   return (
     <main className="home-shell">
-      <aside className="home-sidebar">
-        <div className="home-brand">
-          <span className="brand-mark">
-            <PenLine size={17} strokeWidth={2.2} />
-          </span>
-          <span>Notylo</span>
+      <aside className={`home-sidebar${mobileMenuOpen ? " is-menu-open" : ""}`}>
+        <div className="home-mobile-bar">
+          <div className="home-brand">
+            <span className="brand-mark">
+              <PenLine size={17} strokeWidth={2.2} />
+            </span>
+            <span>Notylo</span>
+          </div>
+          <button
+            className="mobile-menu-toggle"
+            type="button"
+            aria-label={mobileMenuOpen ? "Fermer le menu" : "Ouvrir le menu"}
+            aria-expanded={mobileMenuOpen}
+            aria-controls="mobile-navigation"
+            onClick={() => setMobileMenuOpen((open) => !open)}
+          >
+            {mobileMenuOpen ? <X size={19} /> : <Menu size={20} />}
+          </button>
         </div>
         <button
           className="workspace-switcher"
           type="button"
-          onClick={() => (user ? navigate("/profile") : setAuthOpen(true))}
+          onClick={() => {
+            setMobileMenuOpen(false);
+            if (user) navigate("/profile");
+            else setAuthOpen(true);
+          }}
         >
           <span className="workspace-avatar">{user?.email.slice(0, 1).toUpperCase() ?? "P"}</span>
           <span>{user ? user.displayName : ready ? "Se connecter" : "Compte…"}</span>
           <ChevronRight size={15} />
         </button>
-        <nav className="home-navigation" aria-label="Navigation principale">
-          <a className="active" href="#mes-cahiers">
+        <nav className="home-navigation" id="mobile-navigation" aria-label="Navigation principale">
+          <a className="active" href="#mes-cahiers" onClick={() => setMobileMenuOpen(false)}>
             <Grid2X2 size={17} /> Mes cahiers
           </a>
-          <button type="button" onClick={() => setDialogOpen(true)}>
+          <button
+            type="button"
+            onClick={() => {
+              setMobileMenuOpen(false);
+              setDialogOpen(true);
+            }}
+          >
             <Plus size={17} /> Nouveau cahier
           </button>
-          <button type="button" onClick={() => void importNotezip()}>
+          <button
+            type="button"
+            onClick={() => {
+              setMobileMenuOpen(false);
+              void importNotezip();
+            }}
+          >
             <Upload size={16} /> Importer
           </button>
         </nav>
         <div className="sidebar-footer">
           <p>{user ? "Compte connecté" : ""}</p>
-          <span>
-            {user
-              ? cloudStatus === "syncing"
-                ? "Synchronisation cloud…"
-                : cloudStatus === "conflict"
-                  ? "Un choix de synchronisation est requis."
-                  : cloudStatus === "error"
-                    ? "Cloud indisponible : copie locale conservée."
-                    : "Synchronisé avec votre cloud."
-              : ""}
-          </span>
+          {user && cloudStatus === "conflict" && (
+            <span>Un choix de synchronisation est requis.</span>
+          )}
           {user && (
             <button className="sidebar-signout" type="button" onClick={logout}>
               Se déconnecter
@@ -254,10 +362,30 @@ export function HomePage() {
       </aside>
       <section className="home-content" aria-label="Mes cahiers">
         <header className="home-topbar">
-          <div className="home-search">
+          <form className="home-search" role="search" onSubmit={(event) => event.preventDefault()}>
             <Search size={17} />
-            <span>Rechercher dans vos cahiers</span>
-          </div>
+            <input
+              ref={searchInputRef}
+              type="search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Rechercher dans vos cahiers"
+              aria-label="Rechercher dans vos cahiers"
+            />
+            {searchQuery && (
+              <button
+                className="search-clear"
+                type="button"
+                onClick={() => {
+                  setSearchQuery("");
+                  searchInputRef.current?.focus();
+                }}
+                aria-label="Effacer la recherche"
+              >
+                <X size={15} />
+              </button>
+            )}
+          </form>
           <div className="home-account-actions">
             {user ? (
               <button className="account-button" type="button" onClick={() => navigate("/profile")}>
@@ -285,7 +413,8 @@ export function HomePage() {
               <p>Votre bibliothèque personnelle, disponible hors ligne.</p>
             </div>
             <span>
-              {notebooks.length} {notebooks.length > 1 ? "cahiers" : "cahier"}
+              {visibleNotebooks.length} sur {notebooks.length}{" "}
+              {notebooks.length > 1 ? "cahiers" : "cahier"}
             </span>
           </div>
           {notebooks.length === 0 ? (
@@ -309,9 +438,20 @@ export function HomePage() {
                 Commencer <ChevronRight size={16} />
               </span>
             </button>
+          ) : visibleNotebooks.length === 0 ? (
+            <div className="search-empty" role="status">
+              <Search size={20} aria-hidden="true" />
+              <div>
+                <strong>Aucun cahier trouvé</strong>
+                <p>Essayez un autre titre ou effacez votre recherche.</p>
+              </div>
+              <button type="button" onClick={() => setSearchQuery("")}>
+                Effacer
+              </button>
+            </div>
           ) : (
             <div className="notebook-grid">
-              {notebooks.map((notebook) => (
+              {visibleNotebooks.map((notebook) => (
                 <button
                   key={notebook.id}
                   className="notebook-card"
@@ -421,10 +561,15 @@ export function HomePage() {
               <button type="button" className="text-button" onClick={() => setDialogOpen(false)}>
                 Annuler
               </button>
-              <button type="submit" className="primary-action">
-                Créer le cahier
+              <button type="submit" className="primary-action" disabled={creating}>
+                {creating ? "Création…" : "Créer le cahier"}
               </button>
             </div>
+            {creationError && (
+              <p className="auth-error" role="alert">
+                {creationError}
+              </p>
+            )}
           </form>
         </div>
       )}
@@ -524,35 +669,49 @@ export function HomePage() {
             aria-labelledby="sync-conflict-title"
           >
             <p className="eyebrow">
-              {conflicts[0].kind === "deleted"
+              {conflicts[0].kind === "deleted" || conflicts[0].kind === "local-delete"
                 ? "Conflit de suppression"
                 : "Conflit de synchronisation"}
             </p>
             <h2 id="sync-conflict-title">
               {conflicts[0].kind === "deleted"
                 ? `« ${conflicts[0].title} » a été supprimé dans le cloud`
-                : `Choisir la copie de « ${conflicts[0].title} »`}
+                : conflicts[0].kind === "local-delete"
+                  ? `La suppression de « ${conflicts[0].title} » est en conflit`
+                  : `Choisir la copie de « ${conflicts[0].title} »`}
             </h2>
             <p className="sync-conflict-intro">
               {conflicts[0].kind === "deleted"
                 ? "Cet appareil contient une copie modifiée depuis la dernière synchronisation. Choisissez si vous souhaitez la restaurer ou accepter la suppression cloud."
-                : "Les deux copies ont été modifiées. La version choisie deviendra immédiatement la nouvelle copie cloud."}
+                : conflicts[0].kind === "local-delete"
+                  ? "Cet appareil a demandé une suppression, mais le cahier a été modifié dans le cloud entre-temps. Aucun changement n’est perdu tant que vous n’avez pas choisi."
+                  : "Les deux copies ont été modifiées. La version choisie deviendra immédiatement la nouvelle copie cloud."}
             </p>
             <div className="sync-conflict-options">
               <article>
                 <p>Cet appareil</p>
-                <strong>{formatSyncDate(conflicts[0].local.notebook.updatedAt)}</strong>
+                <strong>
+                  {conflicts[0].kind === "local-delete"
+                    ? `Suppression demandée ${formatSyncDate(conflicts[0].deletedAt)}`
+                    : formatSyncDate(conflicts[0].local.notebook.updatedAt)}
+                </strong>
                 <small>
                   {conflicts[0].kind === "deleted"
                     ? "Restaurer cette copie dans le cloud."
-                    : "Conserver cette copie puis remplacer le cloud."}
+                    : conflicts[0].kind === "local-delete"
+                      ? "Confirmer la suppression, même si le cloud contient une version plus récente."
+                      : "Conserver cette copie puis remplacer le cloud."}
                 </small>
                 <button
                   className="primary-action"
                   disabled={resolvingConflict}
                   onClick={() => void resolveCurrentConflict("local")}
                 >
-                  {conflicts[0].kind === "deleted" ? "Restaurer le cahier" : "Garder cette copie"}
+                  {conflicts[0].kind === "deleted"
+                    ? "Restaurer le cahier"
+                    : conflicts[0].kind === "local-delete"
+                      ? "Confirmer la suppression"
+                      : "Garder cette copie"}
                 </button>
               </article>
               <article>
@@ -573,7 +732,11 @@ export function HomePage() {
                   disabled={resolvingConflict}
                   onClick={() => void resolveCurrentConflict("cloud")}
                 >
-                  {conflicts[0].kind === "deleted" ? "Accepter la suppression" : "Garder le cloud"}
+                  {conflicts[0].kind === "deleted"
+                    ? "Accepter la suppression"
+                    : conflicts[0].kind === "local-delete"
+                      ? "Conserver le cloud"
+                      : "Garder le cloud"}
                 </button>
               </article>
             </div>

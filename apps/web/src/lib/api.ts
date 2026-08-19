@@ -19,6 +19,10 @@ export type AuthResponse = {
   readonly refreshToken: string;
   readonly user: Account;
 };
+export type CloudDocumentResponse = {
+  readonly document: unknown;
+  readonly revision: number;
+};
 
 export class ApiError extends Error {
   constructor(
@@ -194,6 +198,12 @@ export const api = {
 };
 
 export const cloudApi = {
+  create: (token: string, document: unknown) =>
+    request<CloudDocumentResponse>("/cloud/notebooks", {
+      method: "POST",
+      headers: { ...bearer(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ document })
+    }),
   list: (token: string) =>
     request<{
       notebooks: readonly {
@@ -201,24 +211,37 @@ export const cloudApi = {
         title: string;
         mode: "book" | "whiteboard";
         updatedAt: number;
+        revision: number;
       }[];
       deletedNotebooks?: readonly { id: string; deletedAt: number }[];
     }>("/cloud/notebooks", { headers: bearer(token) }),
   load: (token: string, id: string) =>
-    request<{ document: unknown }>(`/cloud/notebooks/${encodeURIComponent(id)}`, {
+    request<CloudDocumentResponse>(`/cloud/notebooks/${encodeURIComponent(id)}`, {
       headers: bearer(token)
     }),
-  save: (token: string, id: string, document: unknown, force = false) =>
-    request<{ document: unknown }>(`/cloud/notebooks/${encodeURIComponent(id)}`, {
+  save: (
+    token: string,
+    id: string,
+    document: unknown,
+    baseRevision: number,
+    force = false
+  ) =>
+    request<CloudDocumentResponse>(`/cloud/notebooks/${encodeURIComponent(id)}`, {
       method: "PUT",
       headers: { ...bearer(token), "Content-Type": "application/json" },
-      body: JSON.stringify({ document, force })
+      body: JSON.stringify({ document, baseRevision, force })
     }),
-  deleteNotebook: (token: string, id: string, deletedAt: number) =>
+  deleteNotebook: (
+    token: string,
+    id: string,
+    deletedAt: number,
+    baseRevision: number,
+    force = false
+  ) =>
     request<void>(`/cloud/notebooks/${encodeURIComponent(id)}`, {
       method: "DELETE",
       headers: { ...bearer(token), "Content-Type": "application/json" },
-      body: JSON.stringify({ deletedAt })
+      body: JSON.stringify({ deletedAt, baseRevision, force })
     }),
   uploadAsset: (token: string, notebookId: string, assetId: string, blob: Blob) =>
     request<void>(

@@ -4,7 +4,7 @@
 
 The current V1 focuses on the web application. Notes are always saved locally first, while an optional self-hosted cloud can synchronize notebooks between devices without making note-taking dependent on the network.
 
-> **Project status:** V1 / active development. The editor, local persistence, account system and snapshot-based private cloud are functional. Some advanced features, notably the final OCR workflow inside the editor, are still being integrated.
+> **Project status:** V1 / active development. The editor, local persistence, account system, private cloud and browser OCR workflow are functional.
 
 ## Highlights
 
@@ -19,7 +19,7 @@ The current V1 focuses on the web application. Notes are always saved locally fi
 - ☁️ Optional private cloud with account authentication
 - 🔑 Email/password authentication and WebAuthn passkeys
 - 📦 Native `.notezip` import/export
-- 🐳 Docker-based API, PostgreSQL, MinIO and OCR services
+- 🧠 Browser OCR with Tesseract.js for text and mathematical expressions
 - 🌐 Installable web/PWA foundation, ready for a later Tauri wrapper
 
 ## How storage works
@@ -56,11 +56,10 @@ Notylo
 │   ├── math-engine/
 │   ├── persistence/
 │   └── shared/
-├── services/
-│   └── ocr/           FastAPI + Tesseract + pix2tex
 ├── docker/
 │   └── init.sql
 ├── docker-compose.yml
+├── docker-compose.coolify.yml
 └── docker-compose.cloud.yml
 ```
 
@@ -74,6 +73,7 @@ Notylo
 - Mammoth
 - SheetJS
 - KaTeX
+- Tesseract.js
 - perfect-freehand
 
 ### Private cloud
@@ -84,15 +84,14 @@ Notylo
 - JWT access + refresh tokens
 - WebAuthn/passkeys
 
-### OCR service
+### Browser OCR
 
-- FastAPI
-- native Tesseract (`fra`, `eng`, `fra+eng`)
-- OpenCV preprocessing
-- pix2tex for math OCR
-- CPU worker limits configurable through environment variables
-
-The pix2tex model is loaded lazily and then reused by the OCR process, which avoids reloading the model for every request on a CPU-only VPS.
+- Tesseract.js runs in a Web Worker, so the server never receives OCR images.
+- French and English language data are cached by the browser after the first scan.
+- The editor prepares a high-resolution, padded selection for better handwriting and
+  formula recognition.
+- Mathematical mode keeps operators and common symbols, then converts the result
+  into a LaTeX math object.
 
 ---
 
@@ -105,7 +104,7 @@ Recommended:
 - **Node.js 24**
 - **pnpm 11**
 - Corepack
-- Docker + Docker Compose for cloud/OCR services
+- Docker + Docker Compose for cloud services
 
 Check your versions:
 
@@ -132,7 +131,7 @@ pnpm install --frozen-lockfile
 
 ## 2. Local-only mode
 
-If you only want the editor and do not need an account, PostgreSQL, MinIO or OCR:
+If you only want the editor and do not need an account, PostgreSQL or MinIO:
 
 ```bash
 pnpm dev
@@ -166,14 +165,14 @@ For development, the defaults are sufficient.
 Then either run the backend services in Docker:
 
 ```bash
-docker compose up -d postgres minio api ocr
+docker compose up -d postgres minio api
 pnpm dev
 ```
 
-or run PostgreSQL/MinIO/OCR in Docker and the API directly with Node:
+or run PostgreSQL/MinIO in Docker and the API directly with Node:
 
 ```bash
-docker compose up -d postgres minio ocr
+docker compose up -d postgres minio
 pnpm dev:api
 ```
 
@@ -191,7 +190,6 @@ Useful local endpoints:
 | API health | `http://localhost:3001/health` |
 | MinIO S3 | `http://localhost:9000` |
 | MinIO console | `http://localhost:9001` |
-| OCR health | `http://localhost:8001/health` |
 
 Check the containers:
 
@@ -203,7 +201,6 @@ Follow logs:
 
 ```bash
 docker compose logs -f api
-docker compose logs -f ocr
 ```
 
 Stop the services without deleting data:
@@ -264,9 +261,61 @@ WEBAUTHN_ORIGIN=https://notes.example.com
 
 ---
 
-# Deploy the private cloud on a VPS
+# Deploy the private cloud on Coolify
 
-The production compose file is designed for a small private VPS. PostgreSQL, MinIO, API and OCR stay on the internal Docker network. Only the web container is bound to `127.0.0.1`, ready to sit behind Caddy, Nginx Proxy Manager, Traefik or another HTTPS reverse proxy.
+`docker-compose.coolify.yml` is the production compose file for Coolify. It
+keeps PostgreSQL and MinIO private and exposes only the `web` service on
+its internal port 80. Do not add host `ports:` mappings to this file: Coolify's
+proxy routes the assigned domain to the container port.
+
+## Coolify setup
+
+1. Create a **Docker Compose** application connected to this repository.
+2. Set the compose file to `docker-compose.coolify.yml`.
+3. Assign the public HTTPS domain only to the `web` service, using container
+   port `80`. Leave `postgres`, `minio` and `api` without domains.
+4. Add the variables below in Coolify's environment editor:
+
+```env
+POSTGRES_PASSWORD=<random-secret>
+MINIO_ACCESS_KEY=notylo
+MINIO_SECRET_KEY=<random-secret>
+MINIO_BUCKET=notylo-assets
+JWT_SECRET=<random-secret-at-least-32-characters>
+REGISTRATION_ENABLED=true
+CORS_ORIGIN=https://notes.example.com
+WEBAUTHN_RP_ID=notes.example.com
+WEBAUTHN_ORIGIN=https://notes.example.com
+LOG_LEVEL=info
+```
+
+Replace `notes.example.com` with the exact domain configured on the `web`
+service. `CORS_ORIGIN` and `WEBAUTHN_ORIGIN` must not have a trailing slash;
+`WEBAUTHN_RP_ID` is the hostname only.
+
+5. Deploy the stack. The named volumes `postgres_data` and `minio_data` must
+   remain attached to the resource across redeployments.
+6. Create the first accounts, then set `REGISTRATION_ENABLED=false` and
+   redeploy.
+
+Verify the public chain after deployment:
+
+```bash
+curl https://notes.example.com/healthz
+curl https://notes.example.com/api/health
+```
+
+The API health endpoint returns HTTP 503 when PostgreSQL is unavailable, so
+Coolify does not route traffic to an API that cannot serve cloud operations.
+
+## Generic VPS deployment
+
+The older `docker-compose.cloud.yml` file remains available for a VPS with an
+external Caddy, Nginx Proxy Manager or Traefik instance. It publishes the web
+container on loopback and is not the file to select for a native Coolify
+Compose application.
+
+The VPS compose file is designed for a small private VPS. PostgreSQL, MinIO and API stay on the internal Docker network. Only the web container is bound to `127.0.0.1`, ready to sit behind Caddy, Nginx Proxy Manager, Traefik or another HTTPS reverse proxy.
 
 ## Recommended VPS baseline
 
@@ -274,20 +323,14 @@ For the current V1:
 
 - Linux x86_64
 - Docker Engine + Docker Compose
-- 4–6 CPU cores recommended if math OCR is used
-- 4 GB RAM minimum; more is preferable for pix2tex
+- a recent browser with Web Worker support for local OCR
+- enough client-side memory for the Tesseract language data cache
 - persistent storage for Docker volumes
 - a domain/subdomain
 - HTTPS
 
-For a 6-core CPU-only VPS, the default OCR limits are intentionally conservative:
-
-```env
-OCR_TEXT_WORKERS=3
-OCR_MATH_WORKERS=1
-```
-
-Tesseract can process several jobs in parallel; pix2tex is kept to one concurrent math job to avoid saturating memory/CPU.
+OCR processing uses the device that runs the editor. The first scan downloads
+the language data in the browser; later scans reuse the cached worker.
 
 ## 1. Clone the repository
 
@@ -326,9 +369,6 @@ REGISTRATION_ENABLED=true
 CORS_ORIGIN=https://notes.example.com
 WEBAUTHN_RP_ID=notes.example.com
 WEBAUTHN_ORIGIN=https://notes.example.com
-
-OCR_TEXT_WORKERS=3
-OCR_MATH_WORKERS=1
 
 WEB_PORT=8080
 LOG_LEVEL=info
@@ -374,8 +414,7 @@ Caddy can then terminate HTTPS while the bundled web Nginx container proxies:
 
 ```text
 /api/*  -> Fastify API
-/ocr/*  -> FastAPI OCR
-/*      -> React application
+/*      -> React application and browser OCR
 ```
 
 Using a single public origin avoids unnecessary cross-origin complexity and is also the cleanest setup for passkeys.
@@ -430,18 +469,11 @@ Expected API state:
 }
 ```
 
-OCR:
-
-```bash
-curl https://notes.example.com/ocr/health
-```
-
 Container logs:
 
 ```bash
 docker compose -f docker-compose.cloud.yml logs -f api
 docker compose -f docker-compose.cloud.yml logs -f web
-docker compose -f docker-compose.cloud.yml logs -f ocr
 ```
 
 ---
@@ -513,29 +545,19 @@ This prevents both accidental resurrection and silent loss of offline work.
 
 ---
 
-# OCR service
+# Browser OCR
 
-The OCR service exposes:
+Select an imported image or one or more handwritten strokes in the editor, then
+open the inspector and choose **Lire le texte** or **Convertir en maths**. The
+selection is rendered locally to an in-memory PNG and passed to a Tesseract.js
+worker. No OCR endpoint or image upload is involved.
 
-```text
-GET  /health
-POST /ocr/text
-POST /ocr/math
-```
-
-Text OCR supports:
-
-```text
-fra
-eng
-fra+eng
-```
-
-The Docker image installs both French and English Tesseract language packs.
-
-Math OCR uses pix2tex and can be CPU-intensive. The model is loaded lazily once and then reused.
-
-> The OCR backend is operational, but the final selection/crop-to-OCR workflow in the web editor is still under development in this V1. Do not interpret the presence of the OCR container as meaning every OCR UI path is already finished.
+The first use downloads the `fra+eng` language data from the Tesseract.js data
+distribution and caches it in the browser. Mathematical mode uses a restricted
+character set and LaTeX normalization for common operators (`√`, `π`, `×`, `÷`,
+exponents and simple fractions). Tesseract.js is not a trained handwritten
+LaTeX model, so complex handwritten layouts may still need a quick correction in
+the generated math object.
 
 ---
 
@@ -729,17 +751,12 @@ docker compose -f docker-compose.cloud.yml logs minio
 docker compose -f docker-compose.cloud.yml logs api
 ```
 
-## OCR is slow on the first math request
+## OCR is slow on the first scan
 
-The first pix2tex request initializes the model. Later requests reuse it.
-
-For a CPU-only VPS, keep:
-
-```env
-OCR_MATH_WORKERS=1
-```
-
-unless you have measured enough CPU and memory headroom to increase it.
+The first browser scan loads the Tesseract.js worker and language data. The
+worker stays alive and the language data is cached locally, so subsequent scans
+on the same device are faster. A high-resolution source image and a tight
+selection generally improve recognition quality.
 
 ---
 

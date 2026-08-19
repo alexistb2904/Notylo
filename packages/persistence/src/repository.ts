@@ -80,14 +80,9 @@ export class NotebookRepository {
     const now = Date.now();
     await db.transaction(
       "rw",
-      db.notebooks,
-      db.pages,
-      db.objects,
-      db.snapshots,
-      db.assets,
-      db.assetRefs,
-      db.syncQueue,
+      [db.notebooks, db.pages, db.objects, db.snapshots, db.assets, db.assetRefs, db.syncQueue],
       async () => {
+        const notebook = await db.notebooks.get(notebookId);
         const refs = await db.assetRefs.where("notebookId").equals(notebookId).toArray();
         await db.syncQueue.where("notebookId").equals(notebookId).delete();
         if (queueCloudDelete) {
@@ -95,7 +90,7 @@ export class NotebookRepository {
             id: deletionQueueId(notebookId),
             notebookId,
             type: "delete",
-            payload: { deletedAt: now },
+            payload: { deletedAt: now, ...(notebook ? { title: notebook.title } : {}) },
             createdAt: now
           });
         }

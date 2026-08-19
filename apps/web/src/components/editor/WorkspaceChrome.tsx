@@ -20,12 +20,16 @@ export function EditorHeader({
 }) {
   const label =
     saveState === "saved"
-      ? "Sauvegardé"
-      : saveState === "saving"
-        ? "Sauvegarde…"
-        : saveState === "offline"
-          ? "Hors connexion"
-          : "Erreur de sauvegarde";
+      ? "Enregistré sur cet appareil"
+      : saveState === "cloud-synced"
+        ? "Synchronisé dans le cloud"
+        : saveState === "saving"
+          ? "Sauvegarde…"
+          : saveState === "offline"
+            ? "Hors connexion"
+            : saveState === "conflict"
+              ? "Conflit de synchronisation"
+              : "Erreur de sauvegarde";
   return (
     <header className="editor-header">
       <button className="back-button" onClick={onBack} aria-label="Retour aux cahiers">

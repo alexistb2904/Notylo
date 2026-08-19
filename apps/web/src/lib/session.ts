@@ -7,7 +7,13 @@ import {
 } from "@notylo/document-model";
 import { NotebookRepository } from "@notylo/persistence";
 
-export type SaveState = "saved" | "saving" | "error" | "offline";
+export type SaveState =
+  | "saved"
+  | "saving"
+  | "error"
+  | "offline"
+  | "cloud-synced"
+  | "conflict";
 
 export function useDocumentSession(
   initial: NotebookDocument,
@@ -66,6 +72,13 @@ export function useDocumentSession(
     },
     [scheduleSave]
   );
+  // A remote update was already persisted by the cloud synchronizer. Adopt it
+  // in memory without scheduling another local/cloud write or polluting undo.
+  const adopt = useCallback((next: NotebookDocument) => {
+    history.current = new TransactionHistory();
+    documentRef.current = next;
+    setDocument(next);
+  }, []);
 
   const undo = useCallback(() => {
     const result = history.current.undo(documentRef.current);
@@ -107,11 +120,12 @@ export function useDocumentSession(
       saveState,
       commit,
       replace,
+      adopt,
       undo,
       redo,
       canUndo: history.current.canUndo,
       canRedo: history.current.canRedo
     }),
-    [document, saveState, commit, replace, undo, redo]
+    [document, saveState, commit, replace, adopt, undo, redo]
   );
 }
