@@ -1,6 +1,7 @@
 import type { PointerEvent } from "react";
 import type { DocumentObject } from "@notylo/document-model";
 import { selectionBounds } from "@notylo/canvas-engine";
+import { t } from "../i18n";
 
 export function SelectionBox({
   objects,
@@ -25,26 +26,10 @@ export function SelectionBox({
         height: bounds.height + 14
       }}
     >
-      <button
-        aria-label="Redimensionner en haut à gauche"
-        className="handle nw"
-        onPointerDown={(event) => onResizeStart("nw", event)}
-      />
-      <button
-        aria-label="Redimensionner en haut à droite"
-        className="handle ne"
-        onPointerDown={(event) => onResizeStart("ne", event)}
-      />
-      <button
-        aria-label="Redimensionner en bas à droite"
-        className="handle se"
-        onPointerDown={(event) => onResizeStart("se", event)}
-      />
-      <button
-        aria-label="Redimensionner en bas à gauche"
-        className="handle sw"
-        onPointerDown={(event) => onResizeStart("sw", event)}
-      />
+      <button aria-label={t("dom.resizeNW")} className="handle nw" onPointerDown={(event) => onResizeStart("nw", event)} />
+      <button aria-label={t("dom.resizeNE")} className="handle ne" onPointerDown={(event) => onResizeStart("ne", event)} />
+      <button aria-label={t("dom.resizeSE")} className="handle se" onPointerDown={(event) => onResizeStart("se", event)} />
+      <button aria-label={t("dom.resizeSW")} className="handle sw" onPointerDown={(event) => onResizeStart("sw", event)} />
       <i className="rotation-handle" />
     </div>
   );
