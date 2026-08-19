@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -29,6 +30,8 @@ interface Props {
   onIcon(shape: IconShape): void;
 }
 
+const MOBILE_PALETTE_QUERY = "(max-width: 760px)";
+
 export function WorkspaceDrawers({
   tool,
   paletteVisible,
@@ -46,18 +49,66 @@ export function WorkspaceDrawers({
   onCloseIcons,
   onIcon
 }: Props) {
+  const mobilePalette = useRef(window.matchMedia(MOBILE_PALETTE_QUERY).matches).current;
+  const paletteStorageKey = mobilePalette
+    ? "notylo-floating-palette-position-mobile"
+    : "notylo-floating-palette-position";
+  const hadStoredPalettePosition = useRef(localStorage.getItem(paletteStorageKey) !== null);
   const [palettePosition, setPalettePosition] = useState(() =>
-    readStoredPoint("notylo-floating-palette-position", { x: 18, y: 18 })
+    readStoredPoint(paletteStorageKey, mobilePalette ? { x: 12, y: 86 } : { x: 18, y: 18 })
   );
+  const paletteRef = useRef<HTMLDivElement>(null);
   const paletteDrag = useRef<
     { pointerId: number; startX: number; startY: number; x: number; y: number } | undefined
   >(undefined);
 
+  const clampPalettePosition = useCallback(
+    (position: { x: number; y: number }) => {
+      const element = paletteRef.current;
+      const host = element?.parentElement;
+      if (!element || !host) return position;
+      const edge = 8;
+      const bottomClearance = mobilePalette ? 86 : edge;
+      const maxX = Math.max(edge, host.clientWidth - element.offsetWidth - edge);
+      const maxY = Math.max(edge, host.clientHeight - element.offsetHeight - bottomClearance);
+      return {
+        x: Math.min(maxX, Math.max(edge, position.x)),
+        y: Math.min(maxY, Math.max(edge, position.y))
+      };
+    },
+    [mobilePalette]
+  );
+
   useEffect(() => {
-    localStorage.setItem("notylo-floating-palette-position", JSON.stringify(palettePosition));
-  }, [palettePosition]);
+    localStorage.setItem(paletteStorageKey, JSON.stringify(palettePosition));
+  }, [palettePosition, paletteStorageKey]);
+
+  useEffect(() => {
+    const element = paletteRef.current;
+    const host = element?.parentElement;
+    if (!element || !host || !paletteVisible) return;
+
+    if (mobilePalette && !hadStoredPalettePosition.current) {
+      hadStoredPalettePosition.current = true;
+      setPalettePosition(
+        clampPalettePosition({
+          x: Math.max(8, (host.clientWidth - element.offsetWidth) / 2),
+          y: Math.max(8, host.clientHeight - element.offsetHeight - 86)
+        })
+      );
+    } else {
+      setPalettePosition((current) => clampPalettePosition(current));
+    }
+
+    const observer = new ResizeObserver(() =>
+      setPalettePosition((current) => clampPalettePosition(current))
+    );
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [clampPalettePosition, mobilePalette, paletteVisible, tool]);
 
   const onPaletteGripDown = (event: PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
     event.stopPropagation();
     paletteDrag.current = {
       pointerId: event.pointerId,
@@ -71,14 +122,19 @@ export function WorkspaceDrawers({
   const onPaletteGripMove = (event: PointerEvent<HTMLButtonElement>) => {
     const drag = paletteDrag.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
     event.stopPropagation();
-    setPalettePosition({
-      x: Math.max(8, drag.x + event.clientX - drag.startX),
-      y: Math.max(8, drag.y + event.clientY - drag.startY)
-    });
+    setPalettePosition(
+      clampPalettePosition({
+        x: drag.x + event.clientX - drag.startX,
+        y: drag.y + event.clientY - drag.startY
+      })
+    );
   };
   const onPaletteGripUp = (event: PointerEvent<HTMLButtonElement>) => {
     if (paletteDrag.current?.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
     paletteDrag.current = undefined;
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -88,8 +144,16 @@ export function WorkspaceDrawers({
     <>
       {(tool === "pen" || tool === "pencil" || tool === "highlighter") && paletteVisible && (
         <div
+          ref={paletteRef}
           className="floating-palette"
-          style={{ left: palettePosition.x, top: palettePosition.y }}
+          style={
+            {
+              left: palettePosition.x,
+              top: palettePosition.y,
+              "--notylo-palette-x": `${palettePosition.x}px`,
+              "--notylo-palette-y": `${palettePosition.y}px`
+            } as CSSProperties
+          }
           role="toolbar"
           aria-label="Palette de dessin"
           onPointerDown={(event) => event.stopPropagation()}
