@@ -13,6 +13,7 @@ import {
   Share2,
   Undo2
 } from "lucide-react";
+import { t } from "../../i18n";
 
 export type PublicAccessMode = "read" | "write";
 
@@ -43,34 +44,34 @@ export function EditorHeader({
 }) {
   const label =
     publicMode === "read"
-      ? "1 doigt pour déplacer · pincer pour zoomer"
+      ? t("header.publicReadHint")
       : publicMode === "write"
         ? saveState === "cloud-synced"
-          ? "Modifications synchronisées"
+          ? t("header.changesSynced")
           : saveState === "saving"
-            ? "Synchronisation…"
+            ? t("header.syncing")
             : saveState === "offline"
-              ? "Hors connexion"
+              ? t("header.offline")
               : saveState === "conflict"
-                ? "Conflit de synchronisation"
+                ? t("header.syncConflict")
                 : saveState === "error"
-                  ? "Erreur de synchronisation"
-                  : "Lien public modifiable"
+                  ? t("header.syncError")
+                  : t("header.publicEditable")
         : readOnly
-          ? "Lecture seule"
+          ? t("header.readOnly")
           : saveState === "saved"
-            ? "Enregistré sur cet appareil"
+            ? t("header.savedDevice")
             : saveState === "cloud-synced"
-              ? "Synchronisé dans le cloud"
+              ? t("header.syncedCloud")
               : saveState === "saving"
-                ? "Sauvegarde…"
+                ? t("header.saving")
                 : saveState === "offline"
-                  ? "Hors connexion"
+                  ? t("header.offline")
                   : saveState === "conflict"
-                    ? "Conflit de synchronisation"
-                    : "Erreur de sauvegarde";
+                    ? t("header.syncConflict")
+                    : t("header.saveError");
   const PublicModeIcon = publicMode === "read" ? Eye : PencilLine;
-  const publicModeLabel = publicMode === "read" ? "Lecture seule" : "Lecture et écriture";
+  const publicModeLabel = publicMode === "read" ? t("header.readOnly") : t("header.readWrite");
 
   return (
     <header
@@ -79,14 +80,18 @@ export function EditorHeader({
       <button
         className="back-button"
         onClick={onBack}
-        aria-label={publicMode ? "Retour à Notylo" : "Retour aux cahiers"}
-        title={publicMode ? "Retour à Notylo" : undefined}
+        aria-label={publicMode ? t("common.backToNotylo") : t("header.backNotebooks")}
+        title={publicMode ? t("common.backToNotylo") : undefined}
       >
         <ArrowLeft size={18} />
       </button>
       <div className="editor-title">
         <span className="document-kind">
-          {publicMode ? "LIEN PUBLIC" : document.notebook.mode === "book" ? "CAHIER" : "WHITEBOARD"}
+          {publicMode
+            ? t("header.publicKind")
+            : document.notebook.mode === "book"
+              ? t("header.bookKind")
+              : t("header.whiteboardKind")}
         </span>
         <h1>{document.notebook.title}</h1>
       </div>
@@ -109,19 +114,19 @@ export function EditorHeader({
           <button
             className="mobile-tools-toggle"
             onClick={onToggleTools}
-            aria-label={toolsOpen ? "Masquer les outils" : "Afficher les outils"}
+            aria-label={toolsOpen ? t("header.hideTools") : t("header.showTools")}
             aria-expanded={toolsOpen}
           >
             <PanelLeft size={17} />
           </button>
         )}
         {!readOnly && (
-          <button onClick={onUndo} aria-label="Annuler">
+          <button onClick={onUndo} aria-label={t("header.undo")}>
             <Undo2 size={17} />
           </button>
         )}
         {!readOnly && (
-          <button onClick={onRedo} aria-label="Rétablir">
+          <button onClick={onRedo} aria-label={t("header.redo")}>
             <Redo2 size={17} />
           </button>
         )}
@@ -130,13 +135,13 @@ export function EditorHeader({
             className="share-button share-trigger"
             onClick={onShare}
             aria-haspopup="dialog"
-            title="Partager ce notebook"
+            title={t("header.shareNotebook")}
           >
-            <Share2 size={15} /> Partager
+            <Share2 size={15} /> {t("header.share")}
           </button>
         )}
         <button className="share-button export-trigger" onClick={onExport}>
-          Exporter
+          {t("header.export")}
         </button>
       </div>
     </header>
@@ -153,7 +158,7 @@ export function ArrowPointHandles({
   onStart(index: number, event: ReactPointerEvent<HTMLButtonElement>): void;
 }) {
   return (
-    <div className="arrow-point-handles" aria-label="Points de la flèche">
+    <div className="arrow-point-handles" aria-label={t("header.arrowPoints")}>
       {arrow.points?.map((point, index) => (
         <button
           key={`${arrow.id}-${index}`}
@@ -163,10 +168,10 @@ export function ArrowPointHandles({
           style={{ left: arrow.x + point.x, top: arrow.y + offsetY + point.y }}
           aria-label={
             index === 0
-              ? "Déplacer le départ de la flèche"
+              ? t("header.moveArrowStart")
               : index === arrow.points!.length - 1
-                ? "Déplacer la pointe de la flèche"
-                : `Déplacer le coude ${index}`
+                ? t("header.moveArrowEnd")
+                : t("header.moveArrowBend", { index })
           }
           onPointerDown={(event) => onStart(index, event)}
         />
@@ -226,7 +231,7 @@ export function Paper({
           "--line-color": page.background.lineColor ?? "#dbe7e3"
         } as CSSProperties
       }
-      aria-label="Page du cahier"
+      aria-label={t("header.paperPage")}
     />
   );
 }
@@ -253,9 +258,7 @@ export function PageNavigator({
       >
         <ChevronUp size={16} />
       </button>
-      <span>
-        Page {active + 1} / {pages.length}
-      </span>
+      <span>{t("common.page", { current: active + 1, total: pages.length })}</span>
       <button
         disabled={active >= pages.length - 1}
         onClick={() => pages[active + 1] && onChange(pages[active + 1]!.id)}
@@ -263,7 +266,7 @@ export function PageNavigator({
         <ChevronDown size={16} />
       </button>
       {canAdd && (
-        <button title="Ajouter une page" onClick={onNew}>
+        <button title={t("common.addPage")} onClick={onNew}>
           <Plus size={15} />
         </button>
       )}
