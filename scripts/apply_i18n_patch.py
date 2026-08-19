@@ -1,0 +1,126 @@
+from pathlib import Path
+
+
+def patch(path: str, replacements: list[tuple[str, str]]) -> None:
+    file = Path(path)
+    text = file.read_text()
+    for old, new in replacements:
+        if old not in text:
+            raise SystemExit(f"Missing i18n patch anchor in {path}: {old[:140]!r}")
+        text = text.replace(old, new, 1)
+    file.write_text(text)
+
+
+patch(
+    "apps/web/src/pages/HomePage.tsx",
+    [
+        (
+            'import {\n  createCloudDocument,\n  reconcileCloud,\n  resolveConflict,\n  type SyncConflict\n} from "../lib/cloud";\n',
+            'import {\n  createCloudDocument,\n  reconcileCloud,\n  resolveConflict,\n  type SyncConflict\n} from "../lib/cloud";\nimport { formatDate, intlLocale, t } from "../i18n";\n',
+        ),
+        ('title: title || "Nouveau cahier",', 'title: title || t("home.newNotebookDefault"),'),
+        ('error instanceof Error ? error.message : "Le cahier n’a pas pu être créé."', 'error instanceof Error ? error.message : t("home.createFailed")'),
+        ('title: `${imported.document.notebook.title} (importé)`,', 'title: `${imported.document.notebook.title} (${t("home.importedSuffix")})`,'),
+        ('error instanceof Error ? error.message : "Cette sauvegarde n’a pas pu être importée."', 'error instanceof Error ? error.message : t("home.importFailed")'),
+        (
+            '  const today = new Intl.DateTimeFormat("fr-FR", {\n    weekday: "long",\n    day: "numeric",\n    month: "long"\n  }).format(new Date());',
+            '  const today = formatDate(new Date(), { weekday: "long", day: "numeric", month: "long" });',
+        ),
+        ('.toLocaleLowerCase("fr-FR");', '.toLocaleLowerCase(intlLocale);'),
+        ('.toLocaleLowerCase("fr-FR")\n          .includes(normalizedQuery)', '.toLocaleLowerCase(intlLocale)\n          .includes(normalizedQuery)'),
+        ('aria-label={mobileMenuOpen ? "Fermer le menu" : "Ouvrir le menu"}', 'aria-label={mobileMenuOpen ? t("home.closeMenu") : t("home.openMenu")}'),
+        ('<span>{user ? user.displayName : ready ? "Se connecter" : "Compte…"}</span>', '<span>{user ? user.displayName : ready ? t("auth.signIn") : t("home.accountPending")}</span>'),
+        ('aria-label="Navigation principale"', 'aria-label={t("home.mainNavigation")}'),
+        ('<Grid2X2 size={17} /> Mes cahiers', '<Grid2X2 size={17} /> {t("home.myNotebooks")}'),
+        ('<Plus size={17} /> Nouveau cahier', '<Plus size={17} /> {t("home.newNotebook")}'),
+        ('<Upload size={16} /> Importer', '<Upload size={16} /> {t("common.import")}'),
+        ('<p>{user ? "Compte connecté" : ""}</p>', '<p>{user ? t("home.connectedAccount") : ""}</p>'),
+        ('<span>Un choix de synchronisation est requis.</span>', '<span>{t("home.syncChoiceRequired")}</span>'),
+        ('              Se déconnecter\n', '              {t("home.signOut")}\n'),
+        ('<PenLine size={14} /> Stylet', '<PenLine size={14} /> {t("home.stylus")}'),
+        ('<Gauge size={14} /> Diagnostic', '<Gauge size={14} /> {t("home.diagnostic")}'),
+        ('<section className="home-content" aria-label="Mes cahiers">', '<section className="home-content" aria-label={t("home.myNotebooks")}>'),
+        ('placeholder="Rechercher dans vos cahiers"\n              aria-label="Rechercher dans vos cahiers"', 'placeholder={t("home.search")}\n              aria-label={t("home.search")}'),
+        ('aria-label="Effacer la recherche"', 'aria-label={t("home.clearSearch")}'),
+        ('                Mon profil\n', '                {t("home.myProfile")}\n'),
+        ('                Se connecter\n', '                {t("auth.signIn")}\n'),
+        ('<Plus size={16} /> Nouveau', '<Plus size={16} /> {t("home.new")}'),
+        ('<h1>Bonjour.</h1>', '<h1>{t("home.hello")}</h1>'),
+        ('<p>Un espace calme pour écrire, dessiner et organiser vos idées.</p>', '<p>{t("home.intro")}</p>'),
+        ('<h2>Mes cahiers</h2>', '<h2>{t("home.myNotebooks")}</h2>'),
+        ('<p>Votre bibliothèque personnelle, disponible hors ligne.</p>', '<p>{t("home.libraryIntro")}</p>'),
+        (
+            '{visibleNotebooks.length} sur {notebooks.length}{" "}\n              {notebooks.length > 1 ? "cahiers" : "cahier"}',
+            '{notebooks.length === 1\n                ? t("home.notebookCountOne", { visible: visibleNotebooks.length, total: notebooks.length })\n                : t("home.notebookCountMany", { visible: visibleNotebooks.length, total: notebooks.length })}',
+        ),
+        ('aria-label="Créer votre premier cahier"', 'aria-label={t("home.createFirstAria")}'),
+        ('<span className="empty-shelf-kicker">Votre espace est prêt</span>', '<span className="empty-shelf-kicker">{t("home.spaceReady")}</span>'),
+        ('<strong>Créez votre premier cahier</strong>', '<strong>{t("home.createFirst")}</strong>'),
+        ('                  Une page vierge pour commencer, enregistrée uniquement sur cet appareil.\n', '                  {t("home.createFirstDescription")}\n'),
+        ('                Commencer <ChevronRight size={16} />', '                {t("home.start")} <ChevronRight size={16} />'),
+        ('<strong>Aucun cahier trouvé</strong>', '<strong>{t("home.noNotebookFound")}</strong>'),
+        ('<p>Essayez un autre titre ou effacez votre recherche.</p>', '<p>{t("home.noNotebookFoundDescription")}</p>'),
+        ('                Effacer\n', '                {t("home.clear")}\n'),
+        ('<p>{notebook.mode === "book" ? "Cahier" : "Whiteboard"}</p>', '<p>{notebook.mode === "book" ? t("common.book") : t("common.whiteboard")}</p>'),
+        (
+            '                      Modifié{" "}\n                      {new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium" }).format(\n                        notebook.updatedAt\n                      )}',
+            '                      {t("home.modified", { date: formatDate(notebook.updatedAt, { dateStyle: "medium" }) })}',
+        ),
+        ('                      Ouvrir <ChevronRight size={14} />', '                      {t("home.open")} <ChevronRight size={14} />'),
+        ('<p className="eyebrow">Nouveau départ</p>', '<p className="eyebrow">{t("home.freshStart")}</p>'),
+        ('<h2>Créer un espace</h2>', '<h2>{t("home.createSpace")}</h2>'),
+        ('              Nom\n', '              {t("home.name")}\n'),
+        ('placeholder="ex. Analyse — Chapitre 1"', 'placeholder={t("home.namePlaceholder")}'),
+        ('<legend>Format</legend>', '<legend>{t("home.format")}</legend>'),
+        ('                  ▤ Cahier\n', '                  ▤ {t("common.book")}\n'),
+        ('                  ⌁ Whiteboard\n', '                  ⌁ {t("common.whiteboard")}\n'),
+        ('<legend>Fond de page</legend>', '<legend>{t("home.pageBackground")}</legend>'),
+        ('? "Vierge"\n                        : value === "ruled"\n                          ? "Lignes"\n                          : value === "grid-5"\n                            ? "Quadrillé"\n                            : value === "dots"\n                              ? "Points"\n                              : "Seyès"', '? t("home.backgroundBlank")\n                        : value === "ruled"\n                          ? t("home.backgroundRuled")\n                          : value === "grid-5"\n                            ? t("home.backgroundGrid")\n                            : value === "dots"\n                              ? t("home.backgroundDots")\n                              : t("home.backgroundSeyes")'),
+        ('                Annuler\n', '                {t("common.cancel")}\n'),
+        ('{creating ? "Création…" : "Créer le cahier"}', '{creating ? t("home.creating") : t("home.createNotebookAction")}'),
+        ('<p className="eyebrow">{notebookMenu.mode === "book" ? "Cahier" : "Whiteboard"}</p>', '<p className="eyebrow">{notebookMenu.mode === "book" ? t("common.book") : t("common.whiteboard")}</p>'),
+        ('              Renommer\n', '              {t("home.rename")}\n'),
+        ('                  Ouvrir le cahier\n', '                  {t("home.openNotebook")}\n'),
+        ('aria-label="Actions secondaires"', 'aria-label={t("home.secondaryActions")}'),
+        ('                  Enregistrer le nom\n', '                  {t("home.saveName")}\n'),
+        ('                  Exporter une copie\n', '                  {t("home.exportCopy")}\n'),
+        ('                  Supprimer…\n', '                  {t("home.delete")}\n'),
+        ('              Fermer\n', '              {t("common.close")}\n'),
+        ('<p className="eyebrow">Action irréversible</p>', '<p className="eyebrow">{t("home.irreversible")}</p>'),
+        ('<h2>Supprimer « {notebookMenu.title} » ?</h2>', '<h2>{t("home.deleteTitle", { title: notebookMenu.title })}</h2>'),
+        ('              Le cahier sera retiré immédiatement de cet appareil. La suppression cloud sera\n              synchronisée dès qu’une connexion et un compte seront disponibles.\n', '              {t("home.deleteDescription")}\n'),
+        ('                Oui, supprimer\n', '                {t("home.deleteConfirm")}\n'),
+        ('? "Conflit de suppression"\n                : "Conflit de synchronisation"', '? t("home.deleteConflict")\n                : t("home.syncConflict")'),
+        ('? `« ${conflicts[0].title} » a été supprimé dans le cloud`\n                : conflicts[0].kind === "local-delete"\n                  ? `La suppression de « ${conflicts[0].title} » est en conflit`\n                  : `Choisir la copie de « ${conflicts[0].title} »`', '? t("home.deletedCloudTitle", { title: conflicts[0].title })\n                : conflicts[0].kind === "local-delete"\n                  ? t("home.localDeleteConflictTitle", { title: conflicts[0].title })\n                  : t("home.copyConflictTitle", { title: conflicts[0].title })'),
+        ('? "Cet appareil contient une copie modifiée depuis la dernière synchronisation. Choisissez si vous souhaitez la restaurer ou accepter la suppression cloud."\n                : conflicts[0].kind === "local-delete"\n                  ? "Cet appareil a demandé une suppression, mais le cahier a été modifié dans le cloud entre-temps. Aucun changement n’est perdu tant que vous n’avez pas choisi."\n                  : "Les deux copies ont été modifiées. La version choisie deviendra immédiatement la nouvelle copie cloud."', '? t("home.deletedCloudIntro")\n                : conflicts[0].kind === "local-delete"\n                  ? t("home.localDeleteConflictIntro")\n                  : t("home.copyConflictIntro")'),
+        ('<p>Cet appareil</p>', '<p>{t("common.thisDevice")}</p>'),
+        ('? `Suppression demandée ${formatSyncDate(conflicts[0].deletedAt)}`', '? t("home.deletionRequestedAt", { date: formatSyncDate(conflicts[0].deletedAt) })'),
+        ('? "Restaurer cette copie dans le cloud."\n                    : conflicts[0].kind === "local-delete"\n                      ? "Confirmer la suppression, même si le cloud contient une version plus récente."\n                      : "Conserver cette copie puis remplacer le cloud."', '? t("home.restoreCloudCopy")\n                    : conflicts[0].kind === "local-delete"\n                      ? t("home.confirmDeleteNewerCloud")\n                      : t("home.keepLocalDescription")'),
+        ('? "Restaurer le cahier"\n                    : conflicts[0].kind === "local-delete"\n                      ? "Confirmer la suppression"\n                      : "Garder cette copie"', '? t("home.restoreNotebook")\n                    : conflicts[0].kind === "local-delete"\n                      ? t("home.confirmDeletion")\n                      : t("home.keepThisCopy")'),
+        ('                <p>Cloud</p>', '                <p>{t("common.cloud")}</p>'),
+        ('<strong>Supprimé {formatSyncDate(conflicts[0].deletedAt)}</strong>', '<strong>{t("home.deletedAt", { date: formatSyncDate(conflicts[0].deletedAt) })}</strong>'),
+        ('<small>Supprimer aussi la copie modifiée de cet appareil.</small>', '<small>{t("home.deleteLocalModified")}</small>'),
+        ('<small>Remplacer la copie de cet appareil par le cloud.</small>', '<small>{t("home.replaceLocalFromCloud")}</small>'),
+        ('? "Accepter la suppression"\n                    : conflicts[0].kind === "local-delete"\n                      ? "Conserver le cloud"\n                      : "Garder le cloud"', '? t("home.acceptDeletion")\n                    : t("home.keepCloud")'),
+        ('                Application de votre choix…\n', '                {t("home.applyingChoice")}\n'),
+        ('return new Intl.DateTimeFormat("fr-FR", { dateStyle: "full", timeStyle: "short" }).format(value);', 'return formatDate(value, { dateStyle: "full", timeStyle: "short" });'),
+    ],
+)
+
+patch(
+    "apps/web/src/components/EditorWorkspace.tsx",
+    [
+        ('import type {\n  DraftInk,', 'import { t } from "../i18n";\nimport type {\n  DraftInk,'),
+        ('label: "Aperçu gomme"', 'label: t("ops.eraserPreview")'),
+        ('eraserMode === "object" ? "Effacer des objets" : "Gommer le trait"', 'eraserMode === "object" ? t("ops.eraseObjects") : t("ops.eraseStroke")'),
+        ('"Ajuster une forme"', 't("ops.adjustShape")'),
+        ('"Déplacer la sélection"', 't("ops.moveSelection")'),
+        ('"Redimensionner la sélection"', 't("ops.resizeSelection")'),
+        ('"Modifier le tracé de la flèche"', 't("ops.editArrow")'),
+        ('const sheetName = workbook.SheetNames[0] ?? "Feuille 1";', 'const sheetName = workbook.SheetNames[0] ?? t("factory.sheet1");'),
+        ('label = "Modifier l’objet"', 'label = t("ops.editObject")'),
+        ('setOcrStatus(mode === "math" ? "Préparation de la formule…" : "Préparation du texte…");', 'setOcrStatus(mode === "math" ? t("ocr.preparingFormula") : t("ocr.preparingText"));'),
+        ('? `Formule ajoutée — confiance estimée à ${confidence} %.`\n          : `Texte ajouté — confiance estimée à ${confidence} %.`', '? t("ocr.formulaAdded", { confidence })\n          : t("ocr.textAdded", { confidence })'),
+        ('setOcrStatus(error instanceof Error ? error.message : "La reconnaissance a échoué.");', 'setOcrStatus(error instanceof Error ? error.message : t("ocr.failed"));'),
+    ],
+)
