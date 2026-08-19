@@ -264,20 +264,20 @@ WEBAUTHN_ORIGIN=https://notes.example.com
 # Deploy the private cloud on Coolify
 
 `docker-compose.coolify.yml` is the production compose file for Coolify. It
-keeps PostgreSQL and MinIO private and exposes only the `web` service on
-its internal port 80. Do not add host `ports:` mappings to this file: Coolify's
-proxy routes the assigned domain to the container port.
+uses an external PostgreSQL server, keeps MinIO private, and exposes only the
+`web` service on its internal port 80. Do not add host `ports:` mappings to
+this file: Coolify's proxy routes the assigned domain to the container port.
 
 ## Coolify setup
 
 1. Create a **Docker Compose** application connected to this repository.
 2. Set the compose file to `docker-compose.coolify.yml`.
 3. Assign the public HTTPS domain only to the `web` service, using container
-   port `80`. Leave `postgres`, `minio` and `api` without domains.
+   port `80`. Leave `minio` and `api` without domains.
 4. Add the variables below in Coolify's environment editor:
 
 ```env
-POSTGRES_PASSWORD=<random-secret>
+DATABASE_URL=postgresql://notylo:<URL-encoded-password>@db.example.com:5432/notylo
 MINIO_ACCESS_KEY=notylo
 MINIO_SECRET_KEY=<random-secret>
 MINIO_BUCKET=notylo-assets
@@ -293,8 +293,8 @@ Replace `notes.example.com` with the exact domain configured on the `web`
 service. `CORS_ORIGIN` and `WEBAUTHN_ORIGIN` must not have a trailing slash;
 `WEBAUTHN_RP_ID` is the hostname only.
 
-5. Deploy the stack. The named volumes `postgres_data` and `minio_data` must
-   remain attached to the resource across redeployments.
+5. Deploy the stack. The named volume `minio_data` must remain attached to the
+   resource across redeployments.
 6. Create the first accounts, then set `REGISTRATION_ENABLED=false` and
    redeploy.
 

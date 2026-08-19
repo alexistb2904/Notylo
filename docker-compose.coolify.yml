@@ -1,20 +1,4 @@
 services:
-  postgres:
-    image: postgres:17-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: notylo
-      POSTGRES_USER: notylo
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Coolify}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./docker:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U notylo -d notylo"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
   minio:
     image: minio/minio:RELEASE.2025-07-23T15-54-02Z
     restart: unless-stopped
@@ -37,8 +21,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in Coolify}
       REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-false}
-      DATABASE_URL: postgresql://notylo@postgres:5432/notylo
-      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Coolify}
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the external PostgreSQL server}
       CORS_ORIGIN: ${CORS_ORIGIN:?Set CORS_ORIGIN to the public HTTPS origin}
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in Coolify}
@@ -49,8 +32,6 @@ services:
     expose:
       - "3001"
     depends_on:
-      postgres:
-        condition: service_healthy
       minio:
         condition: service_started
     healthcheck:
@@ -84,5 +65,4 @@ services:
       retries: 10
 
 volumes:
-  postgres_data:
   minio_data:
