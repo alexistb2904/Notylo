@@ -4,6 +4,7 @@ import { createNotezip } from "@notylo/import-export";
 import type { NotebookDocument } from "@notylo/document-model";
 import { NotebookRepository } from "@notylo/persistence";
 import { webPlatform } from "../lib/platform";
+import { t } from "../i18n";
 
 const repository = new NotebookRepository();
 
@@ -16,7 +17,7 @@ export function ExportDialog({
 }) {
   const capture = async () => {
     const surface = window.document.querySelector<HTMLElement>(".canvas-area");
-    if (!surface) throw new Error("La zone de document n’est pas disponible.");
+    if (!surface) throw new Error(t("export.captureUnavailable"));
     return html2canvas(surface, {
       backgroundColor: "#e4e8e5",
       scale: 2,
@@ -29,7 +30,7 @@ export function ExportDialog({
   const png = async () => {
     const canvas = await capture();
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-    if (!blob) throw new Error("Export PNG impossible.");
+    if (!blob) throw new Error(t("export.pngFailed"));
     await webPlatform.saveFile(`${safeName(document.notebook.title)}.png`, blob);
   };
   const pdf = async () => {
@@ -67,28 +68,24 @@ export function ExportDialog({
       await action();
       onClose();
     } catch (error) {
-      alert(
-        error instanceof Error
-          ? error.message
-          : "L’export a échoué. Votre cahier n’a pas été modifié."
-      );
+      alert(error instanceof Error ? error.message : t("export.failed"));
     }
   };
   return (
-    <div className="export-popover" role="dialog" aria-label="Exporter le cahier">
-      <p className="eyebrow">Copie locale</p>
-      <h2>Exporter</h2>
+    <div className="export-popover" role="dialog" aria-label={t("export.dialogAria")}>
+      <p className="eyebrow">{t("export.localCopy")}</p>
+      <h2>{t("common.export")}</h2>
       <button onClick={() => void perform(png)}>
-        <span>PNG</span>Image de la vue actuelle
+        <span>PNG</span>{t("export.currentView")}
       </button>
       <button onClick={() => void perform(pdf)}>
-        <span>PDF</span>Document imprimable
+        <span>PDF</span>{t("export.printable")}
       </button>
       <button onClick={() => void perform(native)}>
-        <span>NOTEZIP</span>Sauvegarde complète
+        <span>NOTEZIP</span>{t("export.completeBackup")}
       </button>
       <button className="close-export" onClick={onClose}>
-        Fermer
+        {t("common.close")}
       </button>
     </div>
   );
