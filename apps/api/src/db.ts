@@ -34,8 +34,15 @@ export async function ensureSchema(pool: Pool): Promise<void> {
   await pool.query("ALTER TABLE assets ADD COLUMN IF NOT EXISTS client_id TEXT");
   await pool.query("UPDATE assets SET client_id = id::text WHERE client_id IS NULL");
   await pool.query("ALTER TABLE assets ALTER COLUMN client_id SET NOT NULL");
+  // Different logical objects may reference identical bytes. The client id is
+  // the asset identity; the content hash is only a lookup/deduplication hint.
+  await pool.query("ALTER TABLE assets DROP CONSTRAINT IF EXISTS assets_notebook_id_hash_key");
+  await pool.query("DROP INDEX IF EXISTS assets_notebook_id_hash_key");
   await pool.query(
     "CREATE UNIQUE INDEX IF NOT EXISTS assets_notebook_client_id_key ON assets (notebook_id, client_id)"
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS assets_notebook_hash_idx ON assets (notebook_id, hash)"
   );
   await pool.query(
     "CREATE TABLE IF NOT EXISTS notebook_tombstones (id UUID PRIMARY KEY, owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, client_id TEXT NOT NULL, deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (owner_id, client_id))"
