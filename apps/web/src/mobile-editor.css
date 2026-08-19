@@ -10,7 +10,18 @@
 
 @media (max-width: 760px) {
   .editor-shell {
+    /*
+     * 100vh maps to the large/layout viewport on several mobile browsers and can
+     * place the bottom dock behind the browser's address/search bar. Keep 100vh
+     * as the legacy fallback, then use the dynamic viewport when supported so
+     * the whole editor follows the actually visible browser area as chrome opens
+     * and closes.
+     */
+    height: 100vh;
+    height: 100dvh;
+    min-height: 100vh;
     min-height: 100dvh;
+    max-height: 100dvh;
   }
 
   .editor-header {

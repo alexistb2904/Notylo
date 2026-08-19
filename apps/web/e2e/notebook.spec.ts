@@ -80,6 +80,44 @@ test("creates a notebook from the mobile empty state", async ({ page }) => {
   await createNotebook(page, "Maths mobile");
 });
 
+test("keeps the mobile toolbar inside the dynamic viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await createNotebook(page, "Mobile viewport E2E");
+
+  const dock = page.getByRole("navigation", { name: "Outils rapides" });
+  await expect(dock).toBeVisible();
+
+  for (const height of [844, 700, 568]) {
+    await page.setViewportSize({ width: 390, height });
+    await expect(dock).toBeVisible();
+
+    const metrics = await page.evaluate(() => {
+      const shell = document.querySelector<HTMLElement>(".editor-shell");
+      const header = document.querySelector<HTMLElement>(".editor-header");
+      const mobileDock = document.querySelector<HTMLElement>(".mobile-tool-dock");
+      if (!shell || !header || !mobileDock) throw new Error("Mobile editor chrome is missing");
+      const shellRect = shell.getBoundingClientRect();
+      const headerRect = header.getBoundingClientRect();
+      const dockRect = mobileDock.getBoundingClientRect();
+      return {
+        innerHeight: window.innerHeight,
+        visualHeight: window.visualViewport?.height ?? window.innerHeight,
+        shellTop: shellRect.top,
+        shellBottom: shellRect.bottom,
+        dockTop: dockRect.top,
+        dockBottom: dockRect.bottom,
+        headerBottom: headerRect.bottom
+      };
+    });
+
+    const visibleHeight = Math.min(metrics.innerHeight, metrics.visualHeight);
+    expect(metrics.shellTop).toBeGreaterThanOrEqual(-1);
+    expect(metrics.shellBottom).toBeLessThanOrEqual(visibleHeight + 1);
+    expect(metrics.dockBottom).toBeLessThanOrEqual(visibleHeight + 1);
+    expect(metrics.dockTop).toBeGreaterThan(metrics.headerBottom);
+  }
+});
+
 test("uses a thumb-friendly mobile tool dock and bottom sheets", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await createNotebook(page, "Mobile tools E2E");
