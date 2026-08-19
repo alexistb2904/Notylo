@@ -23,10 +23,7 @@ async function drawStroke(page: Page, yOffset: number) {
 
   const start = {
     x: Math.min(visibleRight - 190, visibleLeft + 100),
-    y: Math.max(
-      visibleTop + 35,
-      Math.min(visibleBottom - 35, box.y + 100 + yOffset)
-    )
+    y: Math.max(visibleTop + 35, Math.min(visibleBottom - 35, box.y + 100 + yOffset))
   };
   const target = await page.evaluate(({ x, y }) => {
     const element = document.elementFromPoint(x, y);
@@ -81,6 +78,55 @@ test("creates and reopens a local notebook", async ({ page }) => {
 test("creates a notebook from the mobile empty state", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 568 });
   await createNotebook(page, "Maths mobile");
+});
+
+test("uses a thumb-friendly mobile tool dock and bottom sheets", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await createNotebook(page, "Mobile tools E2E");
+
+  const dock = page.getByRole("navigation", { name: "Outils rapides" });
+  await expect(dock).toBeVisible();
+  await expect(dock.getByRole("button")).toHaveCount(6);
+  await expect(page.getByLabel("Afficher les outils")).toBeHidden();
+  await expect(page.getByLabel("Annuler")).toBeVisible();
+  await expect(page.getByLabel("Rétablir")).toBeVisible();
+
+  const dockBox = await dock.boundingBox();
+  expect(dockBox).not.toBeNull();
+  if (!dockBox) return;
+  expect(dockBox.y + dockBox.height).toBeLessThanOrEqual(844);
+  expect(dockBox.y).toBeGreaterThan(740);
+
+  const palette = page.getByRole("toolbar", { name: "Palette de dessin" });
+  await expect(palette).toBeVisible();
+  const paletteBox = await palette.boundingBox();
+  expect(paletteBox).not.toBeNull();
+  if (paletteBox) expect(paletteBox.y + paletteBox.height).toBeLessThan(dockBox.y);
+
+  await dock.getByRole("button", { name: "Plus d’outils" }).click();
+  const sheet = page.locator(".tool-rail.mobile-sheet-open");
+  await expect(sheet).toBeVisible();
+  const sheetBox = await sheet.boundingBox();
+  expect(sheetBox).not.toBeNull();
+  if (sheetBox) {
+    expect(sheetBox.width).toBeGreaterThan(340);
+    expect(sheetBox.y + sheetBox.height).toBeLessThanOrEqual(dockBox.y - 2);
+  }
+
+  await sheet.getByTitle("Texte (T)").click();
+  await expect(sheet).toBeHidden();
+
+  await dock.getByRole("button", { name: "Stylo" }).click();
+  await expect(palette).toBeVisible();
+  await dock.getByRole("button", { name: "Plus d’outils" }).click();
+  await page.locator(".tool-rail.mobile-sheet-open").getByTitle("Brosses").click();
+
+  const brushes = page.getByRole("dialog", { name: "Brosses et épaisseurs" });
+  await expect(brushes).toBeVisible();
+  await expect(page.getByRole("button", { name: /Crayon esquisse/i })).toBeVisible();
+  const brushBox = await brushes.boundingBox();
+  expect(brushBox).not.toBeNull();
+  if (brushBox) expect(brushBox.y + brushBox.height).toBeLessThanOrEqual(dockBox.y - 2);
 });
 
 test("pans with the middle mouse button without drawing", async ({ page }) => {
