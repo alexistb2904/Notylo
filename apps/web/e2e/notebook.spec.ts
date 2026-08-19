@@ -80,8 +80,8 @@ async function drawRectangleIcon(page: Page) {
   await page.mouse.up();
 }
 
-async function storedInkCount(page: Page): Promise<number> {
-  return page.evaluate(async () => {
+async function storedObjectCount(page: Page, type: "ink" | "shape"): Promise<number> {
+  return page.evaluate(async (objectType) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open("notylo-notes");
       request.onsuccess = () => resolve(request.result);
@@ -90,15 +90,17 @@ async function storedInkCount(page: Page): Promise<number> {
     try {
       return await new Promise<number>((resolve, reject) => {
         const transaction = database.transaction("objects", "readonly");
-        const request = transaction.objectStore("objects").index("type").count("ink");
+        const request = transaction.objectStore("objects").index("type").count(objectType);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
     } finally {
       database.close();
     }
-  });
+  }, type);
 }
+
+const storedInkCount = (page: Page) => storedObjectCount(page, "ink");
 
 test("creates and reopens a local notebook", async ({ page }) => {
   await createNotebook(page, "Maths E2E");
@@ -225,6 +227,7 @@ test("previews an already placed vector shape while it is being dragged", async 
   await page.getByRole("button", { name: "Carré" }).click();
   await drawRectangleIcon(page);
   await expect(page.locator(".vector-object-layer rect").first()).toBeVisible();
+  await expect.poll(() => storedObjectCount(page, "shape")).toBe(1);
 
   // Re-open the document so the scenario exercises an existing persisted shape,
   // not the transient state immediately following insertion.
