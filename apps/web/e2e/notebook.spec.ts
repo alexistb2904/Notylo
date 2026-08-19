@@ -8,22 +8,41 @@ async function createNotebook(page: Page, name: string) {
   await expect(page.getByRole("heading", { name })).toBeVisible();
 }
 
-async function drawStroke(page: Page, yOffset: number) {
+async function createWhiteboard(page: Page, name: string) {
+  await page.goto("/");
+  await page.getByRole("button", { name: /créer votre premier cahier/i }).click();
+  await page.getByLabel("Nom").fill(name);
+  await page.getByRole("button", { name: /whiteboard/i }).click();
+  await page.getByRole("button", { name: /créer le cahier/i }).click();
+  await expect(page.getByRole("heading", { name })).toBeVisible();
+}
+
+async function visiblePaperRect(page: Page) {
   const paper = page.getByLabel("Page du cahier").first();
   const box = await paper.boundingBox();
   expect(box).not.toBeNull();
-  if (!box) return;
+  if (!box) throw new Error("Notebook paper is not visible");
   const viewport = page.viewportSize() ?? { width: 1280, height: 720 };
-  const visibleLeft = Math.max(0, box.x);
-  const visibleRight = Math.min(viewport.width, box.x + box.width);
-  const visibleTop = Math.max(0, box.y);
-  const visibleBottom = Math.min(viewport.height, box.y + box.height);
-  expect(visibleRight - visibleLeft).toBeGreaterThan(220);
-  expect(visibleBottom - visibleTop).toBeGreaterThan(90);
+  return {
+    left: Math.max(0, box.x),
+    right: Math.min(viewport.width, box.x + box.width),
+    top: Math.max(0, box.y),
+    bottom: Math.min(viewport.height, box.y + box.height),
+    box
+  };
+}
+
+async function drawStroke(page: Page, yOffset: number) {
+  const visible = await visiblePaperRect(page);
+  expect(visible.right - visible.left).toBeGreaterThan(220);
+  expect(visible.bottom - visible.top).toBeGreaterThan(90);
 
   const start = {
-    x: Math.min(visibleRight - 190, visibleLeft + 100),
-    y: Math.max(visibleTop + 35, Math.min(visibleBottom - 35, box.y + 100 + yOffset))
+    x: Math.min(visible.right - 190, visible.left + 100),
+    y: Math.max(
+      visible.top + 35,
+      Math.min(visible.bottom - 35, visible.box.y + 100 + yOffset)
+    )
   };
   const target = await page.evaluate(({ x, y }) => {
     const element = document.elementFromPoint(x, y);
@@ -46,6 +65,18 @@ async function drawStroke(page: Page, yOffset: number) {
   await page.mouse.down();
   await page.mouse.move(start.x + 70, start.y + 18, { steps: 7 });
   await page.mouse.move(start.x + 150, start.y - 8, { steps: 7 });
+  await page.mouse.up();
+}
+
+async function drawRectangleIcon(page: Page) {
+  const visible = await visiblePaperRect(page);
+  const start = {
+    x: Math.min(visible.right - 180, visible.left + 160),
+    y: Math.min(visible.bottom - 130, visible.top + 190)
+  };
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x + 110, start.y + 72, { steps: 8 });
   await page.mouse.up();
 }
 
@@ -118,6 +149,24 @@ test("keeps the mobile toolbar inside the dynamic viewport", async ({ page }) =>
   }
 });
 
+test("shows settings in the mobile whiteboard tool menu", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 700 });
+  await createWhiteboard(page, "Whiteboard mobile E2E");
+
+  const dock = page.getByRole("navigation", { name: "Outils rapides" });
+  await dock.getByRole("button", { name: "Plus d’outils" }).click();
+  const sheet = page.locator(".tool-rail.mobile-sheet-open");
+  await expect(sheet).toBeVisible();
+
+  const settings = sheet.getByRole("button", { name: "Ouvrir les réglages" });
+  await expect(settings).toBeVisible();
+  await settings.click();
+  await expect(sheet).toBeHidden();
+  await expect(page.locator(".inspector")).toBeVisible();
+  await expect(page.getByText("Espace", { exact: true })).toBeVisible();
+  await page.getByLabel("Fermer les réglages").click();
+});
+
 test("uses a thumb-friendly mobile tool dock and bottom sheets", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await createNotebook(page, "Mobile tools E2E");
@@ -144,6 +193,7 @@ test("uses a thumb-friendly mobile tool dock and bottom sheets", async ({ page }
   await dock.getByRole("button", { name: "Plus d’outils" }).click();
   const sheet = page.locator(".tool-rail.mobile-sheet-open");
   await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Ouvrir les réglages" })).toBeVisible();
   const sheetBox = await sheet.boundingBox();
   expect(sheetBox).not.toBeNull();
   if (sheetBox) {
@@ -165,6 +215,39 @@ test("uses a thumb-friendly mobile tool dock and bottom sheets", async ({ page }
   const brushBox = await brushes.boundingBox();
   expect(brushBox).not.toBeNull();
   if (brushBox) expect(brushBox.y + brushBox.height).toBeLessThanOrEqual(dockBox.y - 2);
+});
+
+test("previews a placed vector shape while it is being dragged", async ({ page }) => {
+  await createNotebook(page, "Shape drag E2E");
+  const desktopTools = page.locator(".tool-rail");
+
+  await desktopTools.getByTitle("Icônes de base").click();
+  await page.getByRole("button", { name: "Carré" }).click();
+  await drawRectangleIcon(page);
+
+  const shape = page.locator(".vector-object-layer rect").first();
+  await expect(shape).toBeVisible();
+  const beforeTransform = await shape.getAttribute("transform");
+  const box = await shape.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) return;
+
+  const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.down();
+  await page.mouse.move(center.x + 86, center.y + 34, { steps: 12 });
+
+  let liveTransform = beforeTransform;
+  await expect
+    .poll(async () => {
+      liveTransform = await shape.getAttribute("transform");
+      return liveTransform;
+    })
+    .not.toBe(beforeTransform);
+
+  await page.mouse.up();
+  await expect.poll(() => shape.getAttribute("transform")).not.toBe(beforeTransform);
+  expect(liveTransform).not.toBeNull();
 });
 
 test("pans with the middle mouse button without drawing", async ({ page }) => {
