@@ -20,15 +20,10 @@ jobs:
           from pathlib import Path
           path = Path("apps/web/src/pages/HomePage.tsx")
           text = path.read_text()
-          old = '''              <button className="text-button" onClick={() => setConfirmDelete(false)}>
-                Annuler
-              </button>'''
-          new = '''              <button className="text-button" onClick={() => setConfirmDelete(false)}>
-                {t("common.cancel")}
-              </button>'''
-          if old not in text:
-              raise SystemExit("final cancel anchor missing")
-          path.write_text(text.replace(old, new, 1))
+          old = "Annuler"
+          if text.count(old) != 1:
+              raise SystemExit(f"expected exactly one remaining Annuler, found {text.count(old)}")
+          path.write_text(text.replace(old, '{t("common.cancel")}', 1))
       - run: git diff --check
       - name: Commit fix
         run: |
