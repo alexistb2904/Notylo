@@ -21,6 +21,26 @@ async function drawStroke(page: Page, yOffset: number) {
   await page.mouse.up();
 }
 
+async function storedInkCount(page: Page): Promise<number> {
+  return page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("notylo-notes");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise<number>((resolve, reject) => {
+        const transaction = database.transaction("objects", "readonly");
+        const request = transaction.objectStore("objects").index("type").count("ink");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    } finally {
+      database.close();
+    }
+  });
+}
+
 test("creates and reopens a local notebook", async ({ page }) => {
   await createNotebook(page, "Maths E2E");
   await page.reload();
@@ -36,11 +56,15 @@ test("renders live ink as vectors and keeps editor tools available", async ({ pa
   await createNotebook(page, "Ink E2E");
 
   await drawStroke(page, 0);
+  await expect.poll(() => storedInkCount(page)).toBe(1);
   await expect(page.locator(".vector-object-layer path")).toHaveCount(1);
 
   await page.getByTitle("Brosses").click();
   await page.getByRole("button", { name: /Crayon esquisse/i }).click();
+  await expect(page.getByTitle("Crayon")).toHaveAttribute("aria-pressed", "true");
+
   await drawStroke(page, 90);
+  await expect.poll(() => storedInkCount(page)).toBe(2);
   // Fineliner = one outline. Pencil = one outline + one vector graphite texture path.
   await expect(page.locator(".vector-object-layer path")).toHaveCount(3);
 
