@@ -163,7 +163,7 @@ test("shows settings in the mobile whiteboard tool menu", async ({ page }) => {
   await settings.click();
   await expect(sheet).toBeHidden();
   await expect(page.locator(".inspector")).toBeVisible();
-  await expect(page.getByText("Espace", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Fermer les réglages")).toBeVisible();
   await page.getByLabel("Fermer les réglages").click();
 });
 
@@ -217,13 +217,21 @@ test("uses a thumb-friendly mobile tool dock and bottom sheets", async ({ page }
   if (brushBox) expect(brushBox.y + brushBox.height).toBeLessThanOrEqual(dockBox.y - 2);
 });
 
-test("previews a placed vector shape while it is being dragged", async ({ page }) => {
+test("previews an already placed vector shape while it is being dragged", async ({ page }) => {
   await createNotebook(page, "Shape drag E2E");
   const desktopTools = page.locator(".tool-rail");
 
   await desktopTools.getByTitle("Icônes de base").click();
   await page.getByRole("button", { name: "Carré" }).click();
   await drawRectangleIcon(page);
+  await expect(page.locator(".vector-object-layer rect").first()).toBeVisible();
+
+  // Re-open the document so the scenario exercises an existing persisted shape,
+  // not the transient state immediately following insertion.
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Shape drag E2E" })).toBeVisible();
+  await desktopTools.getByTitle("Sélection (V)").click();
+  await expect(desktopTools.getByTitle("Sélection (V)")).toHaveAttribute("aria-pressed", "true");
 
   const shape = page.locator(".vector-object-layer rect").first();
   await expect(shape).toBeVisible();
@@ -319,7 +327,7 @@ test("renders live ink as vectors and keeps editor tools available", async ({ pa
 
   await page.getByRole("button", { name: "Fermer" }).click();
   await desktopTools.getByTitle("Gomme (E)").click();
-  await desktopTools.getByTitle("Propriétés").click();
+  await desktopTools.getByRole("button", { name: "Réglages" }).click();
   await expect(page.getByRole("button", { name: "Objet entier" })).toBeVisible();
   await page.getByRole("button", { name: "Gomme précise" }).click();
   await expect(page.getByRole("button", { name: "Gomme précise" })).toHaveAttribute(
