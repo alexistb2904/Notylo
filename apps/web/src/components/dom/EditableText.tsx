@@ -1,5 +1,6 @@
 import type { DocumentObject } from "@notylo/document-model";
 import type { DOMObjectUpdate } from "./types";
+import { t } from "../../i18n";
 
 export function EditableText({
   object,
@@ -27,7 +28,7 @@ export function EditableText({
           onUpdate(
             object,
             { ...object, html: text, plainText: text, updatedAt: Date.now() },
-            "Modifier le texte"
+            t("dom.editText")
           );
       }}
     >
