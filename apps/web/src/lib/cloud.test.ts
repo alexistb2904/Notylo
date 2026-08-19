@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createNotebook } from "@notylo/document-model";
 import { getDatabase, NotebookRepository } from "@notylo/persistence";
 import { ApiError, cloudApi } from "./api";
-import type * as ApiModule from "./api";
 import { pullCloudDocument, uploadDocument } from "./cloud";
+
+type ApiModule = { cloudApi: typeof cloudApi };
 
 vi.mock("./api", async () => {
   const actual = await vi.importActual<ApiModule>("./api");
