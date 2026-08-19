@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { NotebookDocument } from "@notylo/document-model";
-import { drawInk } from "./canvas/drawInk";
+import { drawInk, type InkRenderQuality } from "./canvas/drawInk";
 import { drawOverlay } from "./canvas/drawOverlay";
 import { drawShape } from "./canvas/drawShape";
 import type { CanvasLayerProps } from "./canvas/types";
@@ -23,6 +23,7 @@ interface DocumentLayerCache {
   readonly pageOffsets?: CanvasLayerProps["pageOffsets"];
   readonly documentMode: CanvasLayerProps["documentMode"];
   readonly movementKey: string;
+  readonly quality: InkRenderQuality;
 }
 
 /** Canvas orchestration with a viewport-aware, reusable document layer. */
@@ -37,11 +38,6 @@ export function CanvasLayer(props: CanvasLayerProps) {
     let lastPaint = -Infinity;
 
     const render = (timestamp: number) => {
-      if (props.renderContinuously && timestamp - lastPaint < 25) {
-        frame = requestAnimationFrame(render);
-        return;
-      }
-      lastPaint = timestamp;
       const parent = target.parentElement;
       if (!parent) return;
       const width = parent.clientWidth;
@@ -51,10 +47,20 @@ export function CanvasLayer(props: CanvasLayerProps) {
         (navigatorWithMemory.deviceMemory !== undefined && navigatorWithMemory.deviceMemory <= 4) ||
         navigator.hardwareConcurrency <= 4 ||
         Math.min(width, height) <= 720;
+      const quality: InkRenderQuality = lowPower ? "economy" : "full";
+
+      // Pointer events can arrive well above display refresh rate. Keep visual
+      // feedback at a stable 60 fps ceiling rather than repainting at 120/240 Hz.
+      if (props.renderContinuously && timestamp - lastPaint < 15.5) {
+        frame = requestAnimationFrame(render);
+        return;
+      }
+      lastPaint = timestamp;
+
       const overscan = preferredOverscan(width, height, lowPower);
       const nativeDpr = window.devicePixelRatio || 1;
-      const dprLimit = lowPower ? 1.25 : 1.75;
-      const pixelBudget = lowPower ? 7_000_000 : 12_000_000;
+      const dprLimit = lowPower ? 1.25 : 1.8;
+      const pixelBudget = lowPower ? 7_000_000 : 13_000_000;
       const maxDprForViewport = Math.sqrt(pixelBudget / Math.max(width * height, 1));
       const renderDpr = Math.max(1, Math.min(nativeDpr, dprLimit, maxDprForViewport));
       const targetWidth = Math.round(width * renderDpr);
@@ -86,6 +92,7 @@ export function CanvasLayer(props: CanvasLayerProps) {
         cache.pageOffsets === props.pageOffsets &&
         cache.documentMode === props.documentMode &&
         cache.movementKey === movementKey &&
+        cache.quality === quality &&
         Math.abs(camera.x - cache.cameraX) <= cache.overscan * 0.55 &&
         Math.abs(camera.y - cache.cameraY) <= cache.overscan * 0.55;
 
@@ -95,6 +102,7 @@ export function CanvasLayer(props: CanvasLayerProps) {
         layer.height = Math.round((height + overscan * 2) * renderDpr);
         const layerContext = layer.getContext("2d");
         if (!layerContext) return;
+        layerContext.imageSmoothingEnabled = true;
         layerContext.setTransform(renderDpr, 0, 0, renderDpr, 0, 0);
         layerContext.translate(
           overscan + props.origin.x + camera.x,
@@ -113,10 +121,15 @@ export function CanvasLayer(props: CanvasLayerProps) {
           if (!objectIntersectsViewport(object, viewport, pageOffsetY)) continue;
           const offset = { x: 0, y: pageOffsetY };
           if (object.type === "ink") {
-            drawInk(layerContext, object, offset, true, 1, {
-              ...viewport,
-              y: viewport.y - pageOffsetY
-            });
+            drawInk(
+              layerContext,
+              object,
+              offset,
+              true,
+              1,
+              { ...viewport, y: viewport.y - pageOffsetY },
+              quality
+            );
           }
           if (object.type === "shape") drawShape(layerContext, object, offset);
         }
@@ -134,13 +147,15 @@ export function CanvasLayer(props: CanvasLayerProps) {
           originY: props.origin.y,
           pageOffsets: props.pageOffsets,
           documentMode: props.documentMode,
-          movementKey
+          movementKey,
+          quality
         };
         documentCache.current = cache;
       }
 
       const context = target.getContext("2d");
       if (!context || !cache) return;
+      context.imageSmoothingEnabled = true;
       context.setTransform(1, 0, 0, 1, 0, 0);
       context.clearRect(0, 0, target.width, target.height);
       const sourceX = Math.round((cache.overscan - (camera.x - cache.cameraX)) * renderDpr);
@@ -178,17 +193,29 @@ export function CanvasLayer(props: CanvasLayerProps) {
             { ...base, points: draft.points },
             { x: 0, y: activeOffset },
             false,
-            1 - progress
+            1 - progress,
+            undefined,
+            quality
           );
           drawInk(
             context,
             { ...base, points: draft.straightLine.points },
             { x: 0, y: activeOffset },
             false,
-            progress
+            progress,
+            undefined,
+            quality
           );
         } else {
-          drawInk(context, { ...base, points: draft.points }, { x: 0, y: activeOffset }, false);
+          drawInk(
+            context,
+            { ...base, points: draft.points },
+            { x: 0, y: activeOffset },
+            false,
+            1,
+            undefined,
+            quality
+          );
         }
       }
       if (props.shapeDraftRef.current)
@@ -196,7 +223,8 @@ export function CanvasLayer(props: CanvasLayerProps) {
       if (movingSelection) {
         for (const object of props.selection) {
           const offset = { x: props.dragOffset.x, y: props.dragOffset.y + activeOffset };
-          if (object.type === "ink") drawInk(context, object, offset, true);
+          if (object.type === "ink")
+            drawInk(context, object, offset, true, 1, undefined, quality);
           if (object.type === "shape") drawShape(context, object, offset);
         }
       }

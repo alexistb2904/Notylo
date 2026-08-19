@@ -19,29 +19,38 @@ export function toInkPoint(event: ReactPointerEvent, point: Point): InkPoint {
 export function appendCoalescedInkPoints(
   points: InkPoint[],
   event: ReactPointerEvent<HTMLDivElement>,
-  worldAt: (event: Pick<ReactPointerEvent, "clientX" | "clientY">) => Point
+  worldAt: (event: Pick<ReactPointerEvent, "clientX" | "clientY">) => Point,
+  minimumDistance = 0.12
 ): void {
   const sourceEvents = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent];
   for (const source of sourceEvents) {
     const point = worldAt(source);
-    appendInkPoint(points, {
-      x: point.x,
-      y: point.y,
-      pressure: pointerPressure(source),
-      tiltX: source.tiltX,
-      tiltY: source.tiltY,
-      timestamp: source.timeStamp
-    });
+    appendInkPoint(
+      points,
+      {
+        x: point.x,
+        y: point.y,
+        pressure: pointerPressure(source),
+        tiltX: source.tiltX,
+        tiltY: source.tiltY,
+        timestamp: source.timeStamp
+      },
+      minimumDistance
+    );
   }
   const point = worldAt(event.nativeEvent);
-  appendInkPoint(points, {
-    x: point.x,
-    y: point.y,
-    pressure: pointerPressure(event),
-    tiltX: event.tiltX,
-    tiltY: event.tiltY,
-    timestamp: event.timeStamp
-  });
+  appendInkPoint(
+    points,
+    {
+      x: point.x,
+      y: point.y,
+      pressure: pointerPressure(event),
+      tiltX: event.tiltX,
+      tiltY: event.tiltY,
+      timestamp: event.timeStamp
+    },
+    minimumDistance
+  );
 }
 
 /** Mouse events commonly report zero; a pen reporting zero is a real tip lift. */
