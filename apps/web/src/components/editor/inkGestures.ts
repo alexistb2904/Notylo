@@ -9,10 +9,10 @@ export function toInkPoint(event: ReactPointerEvent, point: Point): InkPoint {
   return {
     x: point.x,
     y: point.y,
-    pressure: pointerPressure(event),
+    pressure: resolvePointerPressure(event),
     tiltX: event.tiltX,
     tiltY: event.tiltY,
-    timestamp: Date.now()
+    timestamp: event.timeStamp
   };
 }
 
@@ -22,6 +22,8 @@ export function appendCoalescedInkPoints(
   worldAt: (event: Pick<ReactPointerEvent, "clientX" | "clientY">) => Point,
   minimumDistance = 0.12
 ): void {
+  const terminalPenEvent =
+    event.pointerType === "pen" && (event.type === "pointerup" || event.type === "pointercancel");
   const sourceEvents = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent];
   for (const source of sourceEvents) {
     const point = worldAt(source);
@@ -30,7 +32,7 @@ export function appendCoalescedInkPoints(
       {
         x: point.x,
         y: point.y,
-        pressure: pointerPressure(source),
+        pressure: resolvePointerPressure(source, points.at(-1)?.pressure, terminalPenEvent),
         tiltX: source.tiltX,
         tiltY: source.tiltY,
         timestamp: source.timeStamp
@@ -44,7 +46,7 @@ export function appendCoalescedInkPoints(
     {
       x: point.x,
       y: point.y,
-      pressure: pointerPressure(event),
+      pressure: resolvePointerPressure(event, points.at(-1)?.pressure, terminalPenEvent),
       tiltX: event.tiltX,
       tiltY: event.tiltY,
       timestamp: event.timeStamp
@@ -53,10 +55,22 @@ export function appendCoalescedInkPoints(
   );
 }
 
-/** Mouse events commonly report zero; a pen reporting zero is a real tip lift. */
-function pointerPressure(event: Pick<PointerEvent, "pressure" | "pointerType">): number {
+/**
+ * Mouse events commonly report zero and are treated as a neutral 0.5 pressure.
+ * A pen's pointer-up often reports zero because the tip has just left the glass;
+ * that transport-level lift must not introduce a brand-new zero-pressure sample
+ * that changes the perfect-freehand outline only after the user releases.
+ */
+export function resolvePointerPressure(
+  event: Pick<PointerEvent, "pressure" | "pointerType">,
+  previousPressure?: number,
+  terminalPenEvent = false
+): number {
   if (event.pointerType !== "pen") return event.pressure || 0.5;
-  return Math.min(1, Math.max(0, event.pressure));
+  const pressure = Math.min(1, Math.max(0, event.pressure));
+  if (terminalPenEvent && pressure === 0 && previousPressure !== undefined)
+    return previousPressure;
+  return pressure;
 }
 
 export function recognizeInkShape(ink: ReturnType<typeof newInk>): ShapeObject | undefined {
