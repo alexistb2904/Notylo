@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import {
-  createId,
-  createPage,
-  type DocumentObject,
-  type NotebookDocument
-} from "@notylo/document-model";
+import { createId, createPage, type DocumentObject, type NotebookDocument } from "@notylo/document-model";
 import { NotebookRepository } from "@notylo/persistence";
 import { evaluateMath } from "@notylo/math-engine";
 import { EditorWorkspace } from "../components/EditorWorkspace";
@@ -13,13 +8,8 @@ import { ShareDialog } from "../components/ShareDialog";
 import { useDocumentSession } from "../lib/session";
 import { useAuth } from "../lib/auth";
 import { ApiError } from "../lib/api";
-import {
-  pullCloudDocument,
-  resolveConflict,
-  syncConflictFromError,
-  uploadDocument,
-  type SyncConflict
-} from "../lib/cloud";
+import { pullCloudDocument, resolveConflict, syncConflictFromError, uploadDocument, type SyncConflict } from "../lib/cloud";
+import { formatDate, t } from "../i18n";
 
 export function EditorPage() {
   const { id } = useParams();
@@ -39,9 +29,9 @@ export function EditorPage() {
         const document = await repository.load(id);
         if (!active) return;
         if (document) setLoaded(document);
-        else setError("Ce cahier n’existe plus ou n’a pas été trouvé dans cet espace.");
+        else setError(t("editor.notFound"));
       } catch {
-        if (active) setError("Impossible d’ouvrir ce cahier. Vos autres cahiers restent intacts.");
+        if (active) setError(t("editor.openFailed"));
       }
     })();
     return () => {
@@ -52,30 +42,22 @@ export function EditorPage() {
   if (error)
     return (
       <main className="fatal-state">
-        <Link to="/">← Revenir à mes cahiers</Link>
-        <h1>Ouverture impossible</h1>
+        <Link to="/">{t("editor.backNotebooks")}</Link>
+        <h1>{t("editor.openImpossible")}</h1>
         <p>{error}</p>
       </main>
     );
-
   if (!loaded)
     return (
       <main className="loading-state">
         <span className="brand-mark">P</span>
-        <p>Ouverture du cahier…</p>
+        <p>{t("editor.opening")}</p>
       </main>
     );
-
   return <LoadedEditor key={loaded.notebook.id} initial={loaded} repository={repository} />;
 }
 
-function LoadedEditor({
-  initial,
-  repository
-}: {
-  readonly initial: NotebookDocument;
-  readonly repository: NotebookRepository;
-}) {
+function LoadedEditor({ initial, repository }: { readonly initial: NotebookDocument; readonly repository: NotebookRepository }) {
   const navigate = useNavigate();
   const session = useDocumentSession(initial, repository);
   const { accessToken, user, refreshSession } = useAuth();
@@ -88,15 +70,12 @@ function LoadedEditor({
   const conflictBlocked = useRef(false);
   const suppressNextUpload = useRef(false);
   const syncNowRef = useRef<() => Promise<void>>(async () => undefined);
-  const [cloudSaveState, setCloudSaveState] = useState<
-    "saved" | "saving" | "error" | "offline" | "cloud-synced" | "conflict"
-  >(navigator.onLine ? "saved" : "offline");
+  const [cloudSaveState, setCloudSaveState] = useState<"saved" | "saving" | "error" | "offline" | "cloud-synced" | "conflict">(navigator.onLine ? "saved" : "offline");
   const [conflict, setConflict] = useState<SyncConflict>();
   const [resolvingConflict, setResolvingConflict] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [sharePreparing, setSharePreparing] = useState(false);
   const [shareError, setShareError] = useState<string>();
-
   latestDocument.current = session.document;
 
   useEffect(() => {
@@ -109,11 +88,9 @@ function LoadedEditor({
       syncAgain.current = true;
       return;
     }
-
     syncing.current = true;
     window.clearTimeout(retryTimer.current);
     setCloudSaveState("saving");
-
     try {
       await uploadDocument(accessToken, latestDocument.current, user.id);
       setCloudSaveState("cloud-synced");
@@ -125,28 +102,20 @@ function LoadedEditor({
         setCloudSaveState("conflict");
       } else if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
         const refreshed = await refreshSession();
-        if (refreshed)
-          retryTimer.current = window.setTimeout(() => {
-            void syncNowRef.current();
-          }, 500);
+        if (refreshed) retryTimer.current = window.setTimeout(() => void syncNowRef.current(), 500);
         else setCloudSaveState("error");
       } else {
         setCloudSaveState(navigator.onLine ? "error" : "offline");
-        retryTimer.current = window.setTimeout(() => {
-          void syncNowRef.current();
-        }, 15_000);
+        retryTimer.current = window.setTimeout(() => void syncNowRef.current(), 15_000);
       }
     } finally {
       syncing.current = false;
       if (syncAgain.current && !conflictBlocked.current) {
         syncAgain.current = false;
-        debounceTimer.current = window.setTimeout(() => {
-          void syncNowRef.current();
-        }, 250);
+        debounceTimer.current = window.setTimeout(() => void syncNowRef.current(), 250);
       }
     }
   }, [accessToken, refreshSession, user]);
-
   syncNowRef.current = syncNow;
 
   useEffect(() => {
@@ -160,12 +129,8 @@ function LoadedEditor({
       suppressNextUpload.current = false;
       return;
     }
-
     window.clearTimeout(debounceTimer.current);
-    debounceTimer.current = window.setTimeout(() => {
-      void syncNowRef.current();
-    }, 1_800);
-
+    debounceTimer.current = window.setTimeout(() => void syncNowRef.current(), 1_800);
     return () => window.clearTimeout(debounceTimer.current);
   }, [accessToken, user, session.document]);
 
@@ -173,13 +138,7 @@ function LoadedEditor({
     if (!accessToken || !user) return;
     let active = true;
     const pull = async () => {
-      if (
-        !active ||
-        syncing.current ||
-        conflictBlocked.current ||
-        document.visibilityState !== "visible"
-      )
-        return;
+      if (!active || syncing.current || conflictBlocked.current || document.visibilityState !== "visible") return;
       try {
         const result = await pullCloudDocument(accessToken, user.id, latestDocument.current);
         if (!active) return;
@@ -187,9 +146,8 @@ function LoadedEditor({
           suppressNextUpload.current = true;
           session.adopt(result.document);
           setCloudSaveState("cloud-synced");
-        } else if (result.kind === "deleted") {
-          navigate("/", { replace: true });
-        } else if (result.kind === "conflict") {
+        } else if (result.kind === "deleted") navigate("/", { replace: true });
+        else if (result.kind === "conflict") {
           conflictBlocked.current = true;
           setConflict(result.conflict);
           setCloudSaveState("conflict");
@@ -257,167 +215,62 @@ function LoadedEditor({
       await uploadDocument(accessToken, session.document, user.id);
       setShareOpen(true);
     } catch (error) {
-      setShareError(
-        error instanceof Error ? error.message : "Le notebook doit d’abord être synchronisé."
-      );
+      setShareError(error instanceof Error ? error.message : t("editor.shareNeedsSync"));
     } finally {
       setSharePreparing(false);
     }
   };
 
-  const add = (object: DocumentObject) =>
-    session.commit({ kind: "add-object", object, label: "Ajouter un objet" });
-
-  const update = (
-    before: readonly DocumentObject[],
-    after: readonly DocumentObject[],
-    label = "Modifier la sélection"
-  ) => {
+  const add = (object: DocumentObject) => session.commit({ kind: "add-object", object, label: t("ops.addObject") });
+  const update = (before: readonly DocumentObject[], after: readonly DocumentObject[], label = t("ops.editSelection")) => {
     session.commit({ kind: "update-objects", before, after, label });
     if (!session.document.notebook.settings.autoCalculate) return;
-
     const source = after.find((object) => object.type === "text" || object.type === "math");
-    const expression =
-      source?.type === "text"
-        ? source.plainText
-        : source?.type === "math"
-          ? source.latex
-          : undefined;
+    const expression = source?.type === "text" ? source.plainText : source?.type === "math" ? source.latex : undefined;
     if (!source || !expression?.trim().endsWith("=")) return;
-
     const result = evaluateMath(expression);
     if (!result?.canSuggest) return;
-
     const now = Date.now();
     add({
-      id: createId("calc"),
-      notebookId: session.document.notebook.id,
-      ...(source.pageId ? { pageId: source.pageId } : {}),
-      type: "calculation",
-      x: source.x + source.width + 18,
-      y: source.y + source.height / 2 - 20,
-      width: 150,
-      height: 40,
-      rotation: 0,
-      zIndex: session.document.objects.length + 1,
-      opacity: 1,
-      locked: false,
-      hidden: false,
-      createdAt: now,
-      updatedAt: now,
-      sourceLatex: result.latex,
-      resultLatex: result.resultLatex,
-      exact: result.exact,
-      accepted: false
+      id: createId("calc"), notebookId: session.document.notebook.id,
+      ...(source.pageId ? { pageId: source.pageId } : {}), type: "calculation",
+      x: source.x + source.width + 18, y: source.y + source.height / 2 - 20,
+      width: 150, height: 40, rotation: 0, zIndex: session.document.objects.length + 1,
+      opacity: 1, locked: false, hidden: false, createdAt: now, updatedAt: now,
+      sourceLatex: result.latex, resultLatex: result.resultLatex, exact: result.exact, accepted: false
     });
   };
-
-  const remove = (objects: readonly DocumentObject[]) =>
-    session.commit({ kind: "delete-objects", objects, label: "Supprimer" });
-
+  const remove = (objects: readonly DocumentObject[]) => session.commit({ kind: "delete-objects", objects, label: t("ops.delete") });
   const addPage = () => {
     if (session.document.notebook.mode !== "book") return;
     const prior = session.document.pages.at(-1);
     if (!prior) return;
-    const page = createPage(
-      session.document.notebook.id,
-      session.document.pages.length,
-      prior.format === "custom" ? "a4" : prior.format,
-      prior.background
-    );
-    session.commit({ kind: "add-page", page, label: "Ajouter une page" });
+    const page = createPage(session.document.notebook.id, session.document.pages.length, prior.format === "custom" ? "a4" : prior.format, prior.background);
+    session.commit({ kind: "add-page", page, label: t("ops.addPage") });
   };
 
   return (
     <>
-      <EditorWorkspace
-        document={session.document}
-        documentRef={session.documentRef}
-        saveState={accessToken && user ? cloudSaveState : session.saveState}
-        onAdd={add}
-        onUpdate={update}
-        onDelete={remove}
-        onAddPage={addPage}
-        onUndo={session.undo}
-        onRedo={session.redo}
-        onReplace={session.replace}
-        onShare={() => void openShare()}
-      />
-      {sharePreparing && (
-        <p className="public-share-progress" role="status">
-          Préparation du lien public…
-        </p>
-      )}
-      {shareError && (
-        <p className="profile-notice error" role="alert">
-          {shareError}
-        </p>
-      )}
-      {shareOpen && accessToken && (
-        <ShareDialog
-          accessToken={accessToken}
-          notebookId={session.document.notebook.id}
-          onClose={() => setShareOpen(false)}
-        />
-      )}
+      <EditorWorkspace document={session.document} documentRef={session.documentRef} saveState={accessToken && user ? cloudSaveState : session.saveState} onAdd={add} onUpdate={update} onDelete={remove} onAddPage={addPage} onUndo={session.undo} onRedo={session.redo} onReplace={session.replace} onShare={() => void openShare()} />
+      {sharePreparing && <p className="public-share-progress" role="status">{t("editor.preparingPublicLink")}</p>}
+      {shareError && <p className="profile-notice error" role="alert">{shareError}</p>}
+      {shareOpen && accessToken && <ShareDialog accessToken={accessToken} notebookId={session.document.notebook.id} onClose={() => setShareOpen(false)} />}
       {conflict && (
         <div className="modal-backdrop sync-conflict-backdrop" role="presentation">
-          <section
-            className="new-notebook-dialog sync-conflict-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="editor-sync-conflict-title"
-          >
-            <p className="eyebrow">
-              {conflict.kind === "deleted"
-                ? "Conflit de suppression"
-                : "Conflit de synchronisation"}
-            </p>
-            <h2 id="editor-sync-conflict-title">
-              {conflict.kind === "deleted"
-                ? `« ${conflict.title} » a été supprimé dans le cloud`
-                : `Une autre copie a modifié « ${conflict.title} »`}
-            </h2>
-            <p className="sync-conflict-intro">
-              Aucune copie n’est écrasée automatiquement. Choisissez la version qui doit devenir la
-              nouvelle version cloud.
-            </p>
+          <section className="new-notebook-dialog sync-conflict-dialog" role="dialog" aria-modal="true" aria-labelledby="editor-sync-conflict-title">
+            <p className="eyebrow">{conflict.kind === "deleted" ? t("editor.deletedConflict") : t("editor.syncConflict")}</p>
+            <h2 id="editor-sync-conflict-title">{conflict.kind === "deleted" ? t("editor.deletedCloudTitle", { title: conflict.title }) : t("editor.otherCopyTitle", { title: conflict.title })}</h2>
+            <p className="sync-conflict-intro">{t("editor.conflictIntro")}</p>
             <div className="sync-conflict-options">
               <article>
-                <p>Cet appareil</p>
-                <strong>
-                  {conflict.kind === "local-delete"
-                    ? "Suppression demandée"
-                    : new Intl.DateTimeFormat("fr-FR", {
-                        dateStyle: "medium",
-                        timeStyle: "short"
-                      }).format(conflict.local.notebook.updatedAt)}
-                </strong>
-                <button
-                  className="primary-action"
-                  disabled={resolvingConflict}
-                  onClick={() => void resolveEditorConflict("local")}
-                >
-                  {conflict.kind === "deleted" ? "Restaurer cette copie" : "Garder cette copie"}
-                </button>
+                <p>{t("common.thisDevice")}</p>
+                <strong>{conflict.kind === "local-delete" ? t("editor.deletionRequested") : formatDate(conflict.local.notebook.updatedAt, { dateStyle: "medium", timeStyle: "short" })}</strong>
+                <button className="primary-action" disabled={resolvingConflict} onClick={() => void resolveEditorConflict("local")}>{conflict.kind === "deleted" ? t("editor.restoreThisCopy") : t("editor.keepThisCopy")}</button>
               </article>
               <article>
-                <p>Cloud</p>
-                <strong>
-                  {conflict.kind === "deleted"
-                    ? "Cahier supprimé"
-                    : new Intl.DateTimeFormat("fr-FR", {
-                        dateStyle: "medium",
-                        timeStyle: "short"
-                      }).format(conflict.cloud.notebook.updatedAt)}
-                </strong>
-                <button
-                  className="outline-action"
-                  disabled={resolvingConflict}
-                  onClick={() => void resolveEditorConflict("cloud")}
-                >
-                  {conflict.kind === "deleted" ? "Accepter la suppression" : "Garder le cloud"}
-                </button>
+                <p>{t("common.cloud")}</p>
+                <strong>{conflict.kind === "deleted" ? t("editor.notebookDeleted") : formatDate(conflict.cloud.notebook.updatedAt, { dateStyle: "medium", timeStyle: "short" })}</strong>
+                <button className="outline-action" disabled={resolvingConflict} onClick={() => void resolveEditorConflict("cloud")}>{conflict.kind === "deleted" ? t("editor.acceptDeletion") : t("editor.keepCloud")}</button>
               </article>
             </div>
           </section>
