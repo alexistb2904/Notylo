@@ -54,7 +54,7 @@ const makeInk = (
   }))
 });
 
-describe("professional vector ink engine", () => {
+describe("note-taking vector ink engine", () => {
   it("uses exactly the same geometry live and after pointer-up", () => {
     const ink = makeInk([0.2, 0.5, 0.8, 0.6, 0.55]);
     const live = getInkSvgPathData(ink, false, "economy");
@@ -70,25 +70,42 @@ describe("professional vector ink engine", () => {
     expect((path.match(/M/g) ?? [])).toHaveLength(1);
   });
 
-  it("reduces high-frequency centre-line jitter without moving earlier samples later", () => {
-    const source = Array.from({ length: 80 }, (_, index) => ({
-      x: index,
-      y: index % 2 ? 0.5 : -0.5,
-      pressure: 0.5,
-      tiltX: 0,
-      tiltY: 0,
+  it("never moves stylus x/y while smoothing pressure and tilt sensors", () => {
+    const source = [
+      { x: 0, y: 0, pressure: 0.1, tiltX: 0, tiltY: 0, timestamp: 0 },
+      { x: 12, y: 0, pressure: 0.9, tiltX: 20, tiltY: 4, timestamp: 8 },
+      { x: 24, y: 0, pressure: 0.2, tiltX: -10, tiltY: 18, timestamp: 16 },
+      // Deliberately abrupt 90° corner: this used to trigger velocity catch-up snapping.
+      { x: 24, y: 12, pressure: 0.8, tiltX: 30, tiltY: -20, timestamp: 24 },
+      { x: 24, y: 24, pressure: 0.4, tiltX: 4, tiltY: 8, timestamp: 32 }
+    ];
+    const filtered = stabilizeInkPoints(source, 0.7, 2.4);
+
+    expect(filtered.map(({ x, y }) => ({ x, y }))).toEqual(
+      source.map(({ x, y }) => ({ x, y }))
+    );
+    expect(filtered[1]!.pressure).toBeGreaterThan(source[0]!.pressure);
+    expect(filtered[1]!.pressure).toBeLessThan(source[1]!.pressure);
+    expect(filtered[1]!.tiltX).toBeGreaterThan(0);
+    expect(filtered[1]!.tiltX).toBeLessThan(20);
+  });
+
+  it("never rewrites earlier prepared samples when a point is appended", () => {
+    const source = Array.from({ length: 24 }, (_, index) => ({
+      x: index * 2,
+      y: Math.sin(index / 4),
+      pressure: 0.3 + (index % 5) * 0.1,
+      tiltX: index,
+      tiltY: 20 - index / 2,
       timestamp: index * 8
     }));
-    const filtered = stabilizeInkPoints(source, 0.6, 2.2);
-    const visibleNoise = Math.max(...filtered.slice(10).map((point) => Math.abs(point.y)));
-    expect(visibleNoise).toBeLessThan(0.25);
-
+    const first = stabilizeInkPoints(source, 0.55, 2.4);
     const extended = stabilizeInkPoints(
-      [...source, { ...source.at(-1)!, x: 80, y: 0.2, timestamp: 640 }],
-      0.6,
-      2.2
+      [...source, { x: 48, y: 14, pressure: 0.8, tiltX: 30, tiltY: -5, timestamp: 192 }],
+      0.55,
+      2.4
     );
-    expect(extended.slice(0, source.length)).toEqual(filtered);
+    expect(extended.slice(0, source.length)).toEqual(first);
   });
 
   it("keeps real pressure in the vector geometry", () => {
@@ -97,26 +114,41 @@ describe("professional vector ink engine", () => {
     expect(heavy).not.toBe(light);
   });
 
-  it("keeps tilt-aware calligraphy vectorised", () => {
-    const noTilt = getInkSvgPathData(
-      makeInk([0.5, 0.5, 0.5, 0.5], false, "ink-calligraphy", false)
-    );
-    const tilted = getInkSvgPathData(
-      makeInk([0.5, 0.5, 0.5, 0.5], false, "ink-calligraphy", true)
-    );
-    expect(tilted).not.toBe(noTilt);
-    expect(tilted.endsWith("Z")).toBe(true);
+  it("maps legacy brush ids into the three supported note styles", () => {
+    expect(getInkBrushKind(makeInk([0.5], false, "ink-fineliner"))).toBe("ink");
+    expect(getInkBrushKind(makeInk([0.5], false, "ink-calligraphy"))).toBe("ink");
+    expect(getInkBrushKind(makeInk([0.5], false, "marker-medium"))).toBe("ink");
+    expect(getInkBrushKind(makeInk([0.5], false, "wet-paint"))).toBe("ink");
+    expect(getInkBrushKind(makeInk([0.5], false, "pencil-sketch"))).toBe("graphite");
+    expect(getInkBrushKind(makeInk([0.5], false, "pencil-2b"))).toBe("graphite");
+    expect(getInkBrushKind(makeInk([0.5], false, "highlighter-flat"))).toBe("highlighter");
   });
 
-  it("keeps each preset visually distinct without changing the document model", () => {
-    expect(getInkBrushKind(makeInk([0.5], false, "pencil-sketch"))).toBe("graphite");
-    expect(getInkBrushKind(makeInk([0.5], false, "pencil-2b"))).toBe("graphite-soft");
-    expect(getInkBrushKind(makeInk([0.5], false, "highlighter-flat"))).toBe("highlighter");
-    expect(
-      getInkTexture(makeInk([0.5, 0.5, 0.5], false, "pencil-sketch"))?.d
-    ).toBeTruthy();
-    expect(getInkTexture(makeInk([0.5, 0.5, 0.5], false, "wet-paint"))?.d).toBeTruthy();
-    expect(getInkVisual(makeInk([0.5], false, "highlighter-flat")).multiply).toBe(true);
+  it("makes pen pencil and highlighter genuinely different", () => {
+    const pen = makeInk([0.3, 0.5, 0.7, 0.5], false, "ink-fineliner");
+    const pencil = makeInk([0.3, 0.5, 0.7, 0.5], false, "pencil-sketch");
+    const highlighter = makeInk([0.3, 0.5, 0.7, 0.5], false, "highlighter-flat");
+
+    expect(getInkVisual(pen)).toMatchObject({ baseAlpha: 1, multiply: false });
+    expect(getInkTexture(pen)).toBeUndefined();
+
+    expect(getInkVisual(pencil).baseAlpha).toBeLessThan(1);
+    expect(getInkVisual(pencil).multiply).toBe(true);
+    expect(getInkTexture(pencil)?.d).toBeTruthy();
+
+    expect(getInkVisual(highlighter).baseAlpha).toBeLessThan(0.3);
+    expect(getInkVisual(highlighter).multiply).toBe(true);
+    expect(getInkTexture(highlighter)).toBeUndefined();
+
+    expect(getInkSvgPathData(pen)).not.toBe(getInkSvgPathData(pencil));
+    expect(getInkSvgPathData(pen)).not.toBe(getInkSvgPathData(highlighter));
+  });
+
+  it("lets stylus tilt change pencil grain direction without moving the main outline", () => {
+    const untilted = makeInk([0.5, 0.5, 0.5, 0.5], false, "pencil-sketch", false);
+    const tilted = makeInk([0.5, 0.5, 0.5, 0.5], false, "pencil-sketch", true);
+    expect(getInkSvgPathData(tilted)).toBe(getInkSvgPathData(untilted));
+    expect(getInkTexture(tilted)?.d).not.toBe(getInkTexture(untilted)?.d);
   });
 
   it("keeps pencil texture density tied to geometry rather than input sample count", () => {
