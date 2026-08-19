@@ -44,7 +44,10 @@ const DEFAULT_DYNAMICS: InkDynamics = {
   tiltAffectsAngle: false
 };
 
-const preparedCache = new WeakMap<object, { readonly key: string; readonly points: readonly RenderPoint[] }>();
+const preparedCache = new WeakMap<
+  object,
+  { readonly key: string; readonly points: readonly RenderPoint[] }
+>();
 const pathCache = new WeakMap<object, { readonly key: string; readonly path: string }>();
 
 export { stabilizeInkPoints } from "../../lib/ink";
@@ -102,7 +105,8 @@ export function drawInkToCanvas(
   context.save();
   context.translate(offset.x, offset.y);
   context.fillStyle = object.color;
-  context.globalAlpha = getInkBaseAlpha(object) * object.opacity * alpha * averagePressureOpacity(object);
+  context.globalAlpha =
+    getInkBaseAlpha(object) * object.opacity * alpha * averagePressureOpacity(object);
   context.fill(new Path2D(pathData));
   context.restore();
 }
@@ -323,7 +327,10 @@ function tiltAwareRibbonPath(
       y: point.y,
       nx: -ty,
       ny: tx,
-      halfWidth: Math.max(0.14, (size * pressureWidth(point.pressure, dynamics) * projected) / 2)
+      halfWidth: Math.max(
+        0.14,
+        (size * pressureWidth(point.pressure, dynamics) * projected) / 2
+      )
     };
   });
   const left = samples.map((sample) => ({
@@ -390,18 +397,24 @@ function averagePressureOpacity(object: InkLike): number {
   return 0.08 + (total / Math.max(1, points.length - start)) * 0.92;
 }
 
+/**
+ * Texture samples are based on geometric distance, not pointer-event count.
+ * Drawing the same physical line at 100% or 500% therefore keeps comparable
+ * graphite/bristle density, and previously drawn texture marks do not reshuffle
+ * when a new pointer sample arrives.
+ */
 function graphiteTexturePath(
   points: readonly RenderPoint[],
   size: number,
   soft: boolean
 ): string {
-  const targetMarks = soft ? 54 : 40;
-  const stride = Math.max(2, Math.ceil(points.length / targetMarks));
+  const samples = resampleTexturePath(points, Math.max(4, size * (soft ? 1.7 : 2)));
+  if (samples.length < 3) return "";
   let d = "";
-  for (let index = 1; index < points.length - 1; index += stride) {
-    const previous = points[index - 1]!;
-    const point = points[index]!;
-    const next = points[index + 1]!;
+  for (let index = 1; index < samples.length - 1; index++) {
+    const previous = samples[index - 1]!;
+    const point = samples[index]!;
+    const next = samples[index + 1]!;
     let tx = next.x - previous.x;
     let ty = next.y - previous.y;
     const length = Math.hypot(tx, ty) || 1;
@@ -422,12 +435,14 @@ function graphiteTexturePath(
 }
 
 function paintBristlePath(points: readonly RenderPoint[], size: number): string {
+  const samples = resampleTexturePath(points, Math.max(2.5, size * 0.8));
+  if (samples.length < 2) return "";
   const lanes = [-0.38, 0.38];
   let d = "";
   lanes.forEach((lane, laneIndex) => {
-    points.forEach((point, index) => {
-      const previous = points[Math.max(0, index - 1)]!;
-      const next = points[Math.min(points.length - 1, index + 1)]!;
+    samples.forEach((point, index) => {
+      const previous = samples[Math.max(0, index - 1)]!;
+      const next = samples[Math.min(samples.length - 1, index + 1)]!;
       let tx = next.x - previous.x;
       let ty = next.y - previous.y;
       const length = Math.hypot(tx, ty) || 1;
@@ -443,6 +458,50 @@ function paintBristlePath(points: readonly RenderPoint[], size: number): string 
     });
   });
   return d.trim();
+}
+
+function resampleTexturePath(
+  points: readonly RenderPoint[],
+  spacing: number
+): readonly RenderPoint[] {
+  if (points.length < 2) return points;
+  const safeSpacing = Math.max(0.5, spacing);
+  const result: RenderPoint[] = [{ ...points[0]! }];
+  let segmentStart: RenderPoint = { ...points[0]! };
+  let distanceUntilNext = safeSpacing;
+
+  for (let index = 1; index < points.length; index++) {
+    const target = points[index]!;
+    let remaining = Math.hypot(target.x - segmentStart.x, target.y - segmentStart.y);
+    while (remaining >= distanceUntilNext && remaining > 1e-9) {
+      const ratio = distanceUntilNext / remaining;
+      segmentStart = interpolateRenderPoint(segmentStart, target, ratio);
+      result.push(segmentStart);
+      remaining = Math.hypot(target.x - segmentStart.x, target.y - segmentStart.y);
+      distanceUntilNext = safeSpacing;
+    }
+    distanceUntilNext -= remaining;
+    segmentStart = { ...target };
+  }
+
+  return result;
+}
+
+function interpolateRenderPoint(
+  start: RenderPoint,
+  end: RenderPoint,
+  ratio: number
+): RenderPoint {
+  const mix = (from: number | undefined, to: number | undefined) =>
+    (from ?? 0) + ((to ?? 0) - (from ?? 0)) * ratio;
+  return {
+    x: mix(start.x, end.x),
+    y: mix(start.y, end.y),
+    pressure: mix(start.pressure, end.pressure),
+    tiltX: mix(start.tiltX, end.tiltX),
+    tiltY: mix(start.tiltY, end.tiltY),
+    timestamp: mix(start.timestamp, end.timestamp)
+  };
 }
 
 function pseudoRandom(seed: number): number {
