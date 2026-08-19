@@ -13,11 +13,28 @@ async function drawStroke(page: Page, yOffset: number) {
   const box = await paper.boundingBox();
   expect(box).not.toBeNull();
   if (!box) return;
-  const y = box.y + Math.min(box.height - 40, 100 + yOffset);
-  await page.mouse.move(box.x + 100, y);
+  const start = { x: box.x + 100, y: box.y + Math.min(box.height - 40, 100 + yOffset) };
+  const target = await page.evaluate(({ x, y }) => {
+    const element = document.elementFromPoint(x, y);
+    return {
+      tag: element?.tagName ?? "none",
+      className:
+        typeof element?.className === "string"
+          ? element.className
+          : element?.getAttribute("class") ?? "",
+      onPaper: Boolean(element?.closest(".paper")),
+      inCanvas: Boolean(element?.closest(".canvas-area"))
+    };
+  }, start);
+  expect(target, `drawing target was ${target.tag}.${target.className}`).toMatchObject({
+    onPaper: true,
+    inCanvas: true
+  });
+
+  await page.mouse.move(start.x, start.y);
   await page.mouse.down();
-  await page.mouse.move(box.x + 170, y + 18, { steps: 7 });
-  await page.mouse.move(box.x + 250, y - 8, { steps: 7 });
+  await page.mouse.move(box.x + 170, start.y + 18, { steps: 7 });
+  await page.mouse.move(box.x + 250, start.y - 8, { steps: 7 });
   await page.mouse.up();
 }
 
