@@ -6,7 +6,8 @@ import {
   getInkTexture,
   getInkVisual,
   getPressureMaskSegments,
-  stabilizeInkPoints
+  stabilizeInkPoints,
+  streamlineScaleForCapture
 } from "./inkVector";
 
 const makeInk = (
@@ -106,6 +107,34 @@ describe("note-taking vector ink engine", () => {
       2.4
     );
     expect(extended.slice(0, source.length)).toEqual(first);
+  });
+
+  it("reduces streamline latency for precision handwriting captured at high zoom", () => {
+    expect(streamlineScaleForCapture(undefined)).toBe(1);
+    expect(streamlineScaleForCapture(1)).toBe(1);
+    expect(streamlineScaleForCapture(5)).toBeLessThan(0.5);
+    expect(streamlineScaleForCapture(10)).toBeGreaterThanOrEqual(0.32);
+  });
+
+  it("keeps high-zoom precision geometry identical live and committed", () => {
+    const template = makeInk([0.45, 0.55, 0.5, 0.6, 0.48, 0.52]);
+    const tightGlyph: InkObject = {
+      ...template,
+      captureZoom: 5,
+      points: [
+        { x: 0, y: 0, pressure: 0.5, timestamp: 0 },
+        { x: 2.2, y: -4, pressure: 0.52, timestamp: 8 },
+        { x: 4.2, y: 0.2, pressure: 0.48, timestamp: 16 },
+        { x: 2.3, y: 4.4, pressure: 0.55, timestamp: 24 },
+        { x: 0.4, y: 0.7, pressure: 0.5, timestamp: 32 },
+        { x: 5.6, y: 0.1, pressure: 0.51, timestamp: 40 }
+      ]
+    };
+    const normalZoom = { ...tightGlyph, captureZoom: 1 };
+    const live = getInkSvgPathData(tightGlyph, false, "economy");
+    const committed = getInkSvgPathData(tightGlyph, true, "full");
+    expect(live).toBe(committed);
+    expect(live).not.toBe(getInkSvgPathData(normalZoom));
   });
 
   it("keeps real pressure in the vector geometry", () => {
