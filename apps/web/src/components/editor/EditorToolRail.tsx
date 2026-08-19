@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import type { Tool } from "./types";
 import { ToolButton } from "./WorkspaceChrome";
+import { t } from "../../i18n";
 
 interface Props {
   readonly tool: Tool;
@@ -49,22 +50,18 @@ export function EditorToolRail({
     setMobileOpen(false);
     onToolChange(nextTool);
   };
-
   const openBrushes = () => {
     setMobileOpen(false);
     onToggleBrushes();
   };
-
   const openIcons = () => {
     setMobileOpen(false);
     onToggleIcons();
   };
-
   const importFile = () => {
     setMobileOpen(false);
     onImport();
   };
-
   const toggleInspector = () => {
     setMobileOpen(false);
     onToggleInspector();
@@ -76,177 +73,59 @@ export function EditorToolRail({
         <button
           type="button"
           className="mobile-tool-scrim"
-          aria-label="Fermer le menu d’outils"
+          aria-label={t("tools.closeMenu")}
           onClick={() => setMobileOpen(false)}
         />
       )}
-
       <aside
-        className={`tool-rail ${inspectorOpen ? "inspector-open" : ""} ${
-          mobileOpen ? "mobile-sheet-open" : ""
-        }`}
-        aria-label="Outils"
+        className={`tool-rail ${inspectorOpen ? "inspector-open" : ""} ${mobileOpen ? "mobile-sheet-open" : ""}`}
+        aria-label={t("tools.aria")}
       >
         <div className="mobile-tool-sheet-heading">
           <div>
-            <strong>Tous les outils</strong>
-            <span>Ajouter, sélectionner ou annoter</span>
+            <strong>{t("tools.all")}</strong>
+            <span>{t("tools.subtitle")}</span>
           </div>
           <div className="mobile-tool-sheet-actions">
-            <button
-              type="button"
-              onClick={toggleInspector}
-              aria-label="Ouvrir les réglages"
-              title="Propriétés"
-            >
+            <button type="button" onClick={toggleInspector} aria-label={t("tools.openSettings")} title={t("tools.properties")}>
               <Settings2 size={18} />
             </button>
-            <button type="button" onClick={() => setMobileOpen(false)} aria-label="Fermer">
+            <button type="button" onClick={() => setMobileOpen(false)} aria-label={t("common.close")}>
               <X size={18} />
             </button>
           </div>
         </div>
-
-        <ToolButton
-          icon={<MousePointer2 />}
-          label="Sélection (V)"
-          active={tool === "select"}
-          onClick={() => chooseTool("select")}
-        />
-        <ToolButton
-          icon={<LassoSelect />}
-          label="Lasso"
-          active={tool === "lasso"}
-          onClick={() => chooseTool("lasso")}
-        />
+        <ToolButton icon={<MousePointer2 />} label={t("tools.selectionShortcut")} active={tool === "select"} onClick={() => chooseTool("select")} />
+        <ToolButton icon={<LassoSelect />} label={t("tools.lasso")} active={tool === "lasso"} onClick={() => chooseTool("lasso")} />
         <div className="tool-rule" />
-        <ToolButton
-          icon={<PenLine />}
-          label="Stylo (P)"
-          active={tool === "pen"}
-          onClick={() => chooseTool("pen")}
-        />
-        <ToolButton
-          icon={<Pencil />}
-          label="Crayon"
-          active={tool === "pencil"}
-          onClick={() => chooseTool("pencil")}
-        />
-        <button
-          className={`tool-button ${showBrushes ? "active" : ""}`}
-          title="Brosses"
-          aria-pressed={showBrushes}
-          onClick={openBrushes}
-        >
-          <Paintbrush />
-          <span>Brosses</span>
+        <ToolButton icon={<PenLine />} label={t("tools.penShortcut")} active={tool === "pen"} onClick={() => chooseTool("pen")} />
+        <ToolButton icon={<Pencil />} label={t("tools.pencil")} active={tool === "pencil"} onClick={() => chooseTool("pencil")} />
+        <button className={`tool-button ${showBrushes ? "active" : ""}`} title={t("tools.brushes")} aria-pressed={showBrushes} onClick={openBrushes}>
+          <Paintbrush /><span>{t("tools.brushes")}</span>
         </button>
-        <ToolButton
-          icon={<Highlighter />}
-          label="Surligneur"
-          active={tool === "highlighter"}
-          onClick={() => chooseTool("highlighter")}
-        />
-        <ToolButton
-          icon={<Eraser />}
-          label="Gomme (E)"
-          active={tool === "eraser"}
-          onClick={() => chooseTool("eraser")}
-        />
+        <ToolButton icon={<Highlighter />} label={t("tools.highlighter")} active={tool === "highlighter"} onClick={() => chooseTool("highlighter")} />
+        <ToolButton icon={<Eraser />} label={t("tools.eraserShortcut")} active={tool === "eraser"} onClick={() => chooseTool("eraser")} />
         <div className="tool-rule" />
-        <ToolButton
-          icon={<Type />}
-          label="Texte (T)"
-          active={tool === "text"}
-          onClick={() => chooseTool("text")}
-        />
-        <ToolButton
-          icon={<Shapes />}
-          label="Forme libre"
-          active={tool === "shape"}
-          onClick={() => chooseTool("shape")}
-        />
-        <button
-          className={`tool-button ${showIcons || tool === "icon" ? "active" : ""}`}
-          title="Icônes de base"
-          aria-expanded={showIcons}
-          onClick={openIcons}
-        >
-          <Shapes />
-          <span>Icônes</span>
+        <ToolButton icon={<Type />} label={t("tools.textShortcut")} active={tool === "text"} onClick={() => chooseTool("text")} />
+        <ToolButton icon={<Shapes />} label={t("tools.freeShape")} active={tool === "shape"} onClick={() => chooseTool("shape")} />
+        <button className={`tool-button ${showIcons || tool === "icon" ? "active" : ""}`} title={t("tools.basicIcons")} aria-expanded={showIcons} onClick={openIcons}>
+          <Shapes /><span>{t("tools.icons")}</span>
         </button>
-        <ToolButton
-          icon={<Variable />}
-          label="Équation"
-          active={tool === "math"}
-          onClick={() => chooseTool("math")}
-        />
-        <ToolButton
-          icon={<Table2 />}
-          label="Tableau"
-          active={tool === "table"}
-          onClick={() => chooseTool("table")}
-        />
+        <ToolButton icon={<Variable />} label={t("tools.equation")} active={tool === "math"} onClick={() => chooseTool("math")} />
+        <ToolButton icon={<Table2 />} label={t("tools.table")} active={tool === "table"} onClick={() => chooseTool("table")} />
         <div className="tool-rule" />
-        <button className="tool-button" title="Importer" onClick={importFile}>
-          <Download />
-          <span>Importer</span>
-        </button>
-        <ToolButton
-          icon={<Hand />}
-          label="Déplacer (H)"
-          active={tool === "hand"}
-          onClick={() => chooseTool("hand")}
-        />
-        <button className="tool-button bottom-tool" title="Propriétés" onClick={toggleInspector}>
-          <Settings2 />
-          <span>Réglages</span>
-        </button>
+        <button className="tool-button" title={t("common.import")} onClick={importFile}><Download /><span>{t("common.import")}</span></button>
+        <ToolButton icon={<Hand />} label={t("tools.moveShortcut")} active={tool === "hand"} onClick={() => chooseTool("hand")} />
+        <button className="tool-button bottom-tool" title={t("tools.properties")} onClick={toggleInspector}><Settings2 /><span>{t("tools.settings")}</span></button>
       </aside>
-
-      <nav
-        className={`mobile-tool-dock ${inspectorOpen ? "is-obscured" : ""}`}
-        aria-label="Outils rapides"
-      >
-        <ToolButton
-          icon={<MousePointer2 />}
-          label="Sélection"
-          active={tool === "select"}
-          onClick={() => chooseTool("select")}
-        />
-        <ToolButton
-          icon={<PenLine />}
-          label="Stylo"
-          active={tool === "pen"}
-          onClick={() => chooseTool("pen")}
-        />
-        <ToolButton
-          icon={<Highlighter />}
-          label="Surligneur"
-          active={tool === "highlighter"}
-          onClick={() => chooseTool("highlighter")}
-        />
-        <ToolButton
-          icon={<Eraser />}
-          label="Gomme"
-          active={tool === "eraser"}
-          onClick={() => chooseTool("eraser")}
-        />
-        <ToolButton
-          icon={<Hand />}
-          label="Déplacer"
-          active={tool === "hand"}
-          onClick={() => chooseTool("hand")}
-        />
-        <button
-          type="button"
-          className={`tool-button mobile-more-button ${mobileOpen ? "active" : ""}`}
-          aria-label={mobileOpen ? "Fermer tous les outils" : "Plus d’outils"}
-          aria-expanded={mobileOpen}
-          onClick={() => setMobileOpen((value) => !value)}
-        >
-          <MoreHorizontal />
-          <span>Plus</span>
+      <nav className={`mobile-tool-dock ${inspectorOpen ? "is-obscured" : ""}`} aria-label={t("tools.quick")}>
+        <ToolButton icon={<MousePointer2 />} label={t("tools.selection")} active={tool === "select"} onClick={() => chooseTool("select")} />
+        <ToolButton icon={<PenLine />} label={t("tools.pen")} active={tool === "pen"} onClick={() => chooseTool("pen")} />
+        <ToolButton icon={<Highlighter />} label={t("tools.highlighter")} active={tool === "highlighter"} onClick={() => chooseTool("highlighter")} />
+        <ToolButton icon={<Eraser />} label={t("tools.eraser")} active={tool === "eraser"} onClick={() => chooseTool("eraser")} />
+        <ToolButton icon={<Hand />} label={t("tools.move")} active={tool === "hand"} onClick={() => chooseTool("hand")} />
+        <button type="button" className={`tool-button mobile-more-button ${mobileOpen ? "active" : ""}`} aria-label={mobileOpen ? t("tools.closeAll") : t("tools.more")} aria-expanded={mobileOpen} onClick={() => setMobileOpen((value) => !value)}>
+          <MoreHorizontal /><span>{t("tools.moreShort")}</span>
         </button>
       </nav>
     </>
