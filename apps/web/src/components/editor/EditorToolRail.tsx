@@ -92,9 +92,19 @@ export function EditorToolRail({
             <strong>Tous les outils</strong>
             <span>Ajouter, sélectionner ou annoter</span>
           </div>
-          <button type="button" onClick={() => setMobileOpen(false)} aria-label="Fermer">
-            <X size={18} />
-          </button>
+          <div className="mobile-tool-sheet-actions">
+            <button
+              type="button"
+              onClick={toggleInspector}
+              aria-label="Ouvrir les réglages"
+              title="Propriétés"
+            >
+              <Settings2 size={18} />
+            </button>
+            <button type="button" onClick={() => setMobileOpen(false)} aria-label="Fermer">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         <ToolButton
