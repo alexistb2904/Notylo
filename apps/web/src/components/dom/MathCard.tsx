@@ -2,6 +2,7 @@ import katex from "katex";
 import { useEffect, useState } from "react";
 import type { DocumentObject } from "@notylo/document-model";
 import type { DOMObjectUpdate } from "./types";
+import { t } from "../../i18n";
 
 export function MathCard({
   object,
@@ -25,7 +26,7 @@ export function MathCard({
         onBlur={() => {
           setEditing(false);
           if (latex !== object.latex)
-            onUpdate(object, { ...object, latex, updatedAt: Date.now() }, "Modifier l’équation");
+            onUpdate(object, { ...object, latex, updatedAt: Date.now() }, t("dom.editEquation"));
         }}
         aria-label="LaTeX"
       />
@@ -37,7 +38,7 @@ export function MathCard({
         onDoubleClick={() => {
           if (!readOnly) setEditing(true);
         }}
-        title="Double-cliquez pour modifier le LaTeX"
+        title={readOnly ? undefined : t("dom.editLatexHint")}
         dangerouslySetInnerHTML={{
           __html: katex.renderToString(object.latex, {
             displayMode: object.displayMode,
