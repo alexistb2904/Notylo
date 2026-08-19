@@ -10,6 +10,7 @@ import {
   type TableObject,
   type TextObject
 } from "@notylo/document-model";
+import { t } from "../i18n";
 
 type ObjectBaseInput = Pick<
   BaseObject,
@@ -61,7 +62,7 @@ export function newInk(
   };
 }
 export function newText(input: ObjectBaseInput & { text?: string }): TextObject {
-  const text = input.text ?? "Écrire ici";
+  const text = input.text ?? t("factory.writeHere");
   return {
     ...common(input),
     type: "text",
@@ -108,9 +109,9 @@ export function newTable(input: ObjectBaseInput): TableObject {
     ...common(input),
     type: "table",
     rows: Array.from({ length: 3 }, (_, row) =>
-      Array.from({ length: 3 }, (_, col) => ({
+      Array.from({ length: 3 }, () => ({
         id: createId("cell"),
-        text: row === 0 ? (["Titre", "Titre", "Titre"][col] ?? "Titre") : ""
+        text: row === 0 ? t("factory.tableHeader") : ""
       }))
     ),
     style: { borderColor: "#b5b5b0", headerBackground: "#eeeeea", textColor: "#30302e" }
