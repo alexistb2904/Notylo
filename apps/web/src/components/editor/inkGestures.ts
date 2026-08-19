@@ -26,13 +26,14 @@ export function appendCoalescedInkPoints(
     event.pointerType === "pen" && (event.type === "pointerup" || event.type === "pointercancel");
   const sourceEvents = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent];
   for (const source of sourceEvents) {
+    if (isTerminalPenLift(source, terminalPenEvent)) continue;
     const point = worldAt(source);
     appendInkPoint(
       points,
       {
         x: point.x,
         y: point.y,
-        pressure: resolvePointerPressure(source, points.at(-1)?.pressure, terminalPenEvent),
+        pressure: resolvePointerPressure(source),
         tiltX: source.tiltX,
         tiltY: source.tiltY,
         timestamp: source.timeStamp
@@ -40,13 +41,14 @@ export function appendCoalescedInkPoints(
       minimumDistance
     );
   }
+  if (isTerminalPenLift(event, terminalPenEvent)) return;
   const point = worldAt(event.nativeEvent);
   appendInkPoint(
     points,
     {
       x: point.x,
       y: point.y,
-      pressure: resolvePointerPressure(event, points.at(-1)?.pressure, terminalPenEvent),
+      pressure: resolvePointerPressure(event),
       tiltX: event.tiltX,
       tiltY: event.tiltY,
       timestamp: event.timeStamp
@@ -56,11 +58,18 @@ export function appendCoalescedInkPoints(
 }
 
 /**
- * Mouse events commonly report zero and are treated as a neutral 0.5 pressure.
- * A pen's pointer-up often reports zero because the tip has just left the glass;
- * that transport-level lift must not introduce a brand-new zero-pressure sample
- * that changes the perfect-freehand outline only after the user releases.
+ * A zero-pressure pointer-up is a transport-level "tip left the glass" sample,
+ * not a new contact point. Skipping it prevents endpoint movement/width changes
+ * that would otherwise happen only after the user releases the stylus.
  */
+export function isTerminalPenLift(
+  event: Pick<PointerEvent, "pressure" | "pointerType">,
+  terminalPenEvent: boolean
+): boolean {
+  return terminalPenEvent && event.pointerType === "pen" && event.pressure === 0;
+}
+
+/** Mouse events commonly report zero and are treated as a neutral 0.5 pressure. */
 export function resolvePointerPressure(
   event: Pick<PointerEvent, "pressure" | "pointerType">,
   previousPressure?: number,
