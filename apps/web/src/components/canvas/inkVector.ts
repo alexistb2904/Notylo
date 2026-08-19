@@ -4,14 +4,7 @@ import type { Point } from "@notylo/canvas-engine";
 import { stabilizeInkPoints, type RenderInkPoint } from "../../lib/ink";
 
 export type InkRenderQuality = "economy" | "full";
-export type BrushKind =
-  | "ink"
-  | "nib"
-  | "graphite"
-  | "graphite-soft"
-  | "marker"
-  | "paint"
-  | "highlighter";
+export type BrushKind = "ink" | "graphite" | "highlighter";
 
 type RenderPoint = RenderInkPoint;
 type InkLike = Pick<
@@ -37,6 +30,15 @@ export interface InkTexture {
   readonly strokeWidth: number;
 }
 
+interface StrokeProfile {
+  readonly thinning: number;
+  readonly smoothingBase: number;
+  readonly smoothingRange: number;
+  readonly streamlineBase: number;
+  readonly streamlineRange: number;
+  readonly roundCaps: boolean;
+}
+
 const DEFAULT_DYNAMICS: InkDynamics = {
   pressureSensitivity: 0.5,
   pressureAffectsWidth: true,
@@ -53,9 +55,11 @@ const pathCache = new WeakMap<object, { readonly key: string; readonly path: str
 export { stabilizeInkPoints } from "../../lib/ink";
 
 /**
- * Resolution-independent vector outline. `complete` and `quality` are retained in
- * the signature for old callers, but neither is allowed to change the geometry.
- * Performance profiles may simplify secondary texture, never the actual handwriting.
+ * Resolution-independent vector outline.
+ *
+ * There is intentionally only one positional smoothing stage: perfect-freehand.
+ * The sensor preparation step may soften pressure/tilt but keeps x/y untouched.
+ * Live SVG and committed SVG therefore share the exact same trajectory pipeline.
  */
 export function getInkSvgPathData(
   object: InkLike,
@@ -72,23 +76,25 @@ export function getInkSvgPathData(
     last.x.toFixed(3),
     last.y.toFixed(3),
     last.pressure.toFixed(3),
+    (last.tiltX ?? 0).toFixed(2),
+    (last.tiltY ?? 0).toFixed(2),
     object.size.toFixed(3),
     (object.smoothing ?? 0.55).toFixed(3),
     dynamics.pressureSensitivity.toFixed(3),
     dynamics.pressureAffectsWidth ? 1 : 0,
-    dynamics.tiltAffectsAngle ? 1 : 0,
     kind
   ].join(":");
   const cacheKey = object.points as object;
   const cached = pathCache.get(cacheKey);
   if (cached?.key === key) return cached.path;
 
-  const tiltAware =
-    dynamics.tiltAffectsAngle &&
-    (kind === "nib" || kind === "marker" || kind === "highlighter");
-  const path = tiltAware
-    ? tiltAwareRibbonPath(points, object.size, dynamics, kind)
-    : perfectFreehandPath(points, object.size, object.smoothing ?? 0.55, dynamics, kind);
+  const path = perfectFreehandPath(
+    points,
+    object.size,
+    object.smoothing ?? 0.55,
+    dynamics,
+    kind
+  );
   pathCache.set(cacheKey, { key, path });
   return path;
 }
@@ -111,7 +117,7 @@ export function drawInkToCanvas(
   context.restore();
 }
 
-/** Backward-compatible live helper. Shape is exactly the same as committed SVG. */
+/** Backward-compatible preview helper; geometry is identical to committed SVG. */
 export function drawInkVectorPreview(
   context: CanvasRenderingContext2D,
   object: InkLike,
@@ -123,20 +129,26 @@ export function drawInkVectorPreview(
   drawInkToCanvas(context, object, offset, alpha);
 }
 
+/**
+ * Three real note-taking styles. Legacy ids map to the nearest style so old
+ * notebooks remain visually valid after removing the fake paint/marker presets.
+ */
 export function getInkBrushKind(object: Pick<InkObject, "brushId" | "tool">): BrushKind {
   switch (object.brushId) {
-    case "ink-calligraphy":
-      return "nib";
     case "pencil-sketch":
-      return "graphite";
     case "pencil-2b":
-      return "graphite-soft";
-    case "marker-medium":
-      return "marker";
-    case "wet-paint":
-      return "paint";
+      return "graphite";
     case "highlighter-flat":
       return "highlighter";
+    case "ink-calligraphy":
+    case "marker-medium":
+    case "wet-paint":
+    case "ink-fineliner":
+      return object.tool === "pencil"
+        ? "graphite"
+        : object.tool === "highlighter"
+          ? "highlighter"
+          : "ink";
     default:
       return object.tool === "pencil"
         ? "graphite"
@@ -150,43 +162,34 @@ export function getInkVisual(object: Pick<InkObject, "brushId" | "tool">): Brush
   const kind = getInkBrushKind(object);
   switch (kind) {
     case "graphite":
-      return { kind, baseAlpha: 0.5, multiply: true };
-    case "graphite-soft":
-      return { kind, baseAlpha: 0.62, multiply: true };
-    case "paint":
-      return { kind, baseAlpha: 0.64, multiply: true };
+      return { kind, baseAlpha: 0.76, multiply: true };
     case "highlighter":
-      return { kind, baseAlpha: 0.24, multiply: true };
-    case "marker":
-      return { kind, baseAlpha: 0.76, multiply: false };
-    case "nib":
-      return { kind, baseAlpha: 0.96, multiply: false };
+      return { kind, baseAlpha: 0.22, multiply: true };
     default:
-      return { kind, baseAlpha: 0.99, multiply: false };
+      return { kind, baseAlpha: 1, multiply: false };
   }
 }
 
+/**
+ * Pencil gets a deterministic vector graphite grain. The pen stays clean and the
+ * highlighter stays translucent; no raster dabs are required for any tool.
+ */
 export function getInkTexture(object: InkLike): InkTexture | undefined {
-  const kind = getInkBrushKind(object);
+  if (getInkBrushKind(object) !== "graphite") return undefined;
   const points = preparedInkPoints(object);
   if (points.length < 2) return undefined;
-  if (kind === "graphite" || kind === "graphite-soft") {
-    const d = graphiteTexturePath(points, object.size, kind === "graphite-soft");
-    return d
-      ? {
-          d,
-          opacity: kind === "graphite-soft" ? 0.22 : 0.18,
-          strokeWidth: Math.max(0.2, object.size * (kind === "graphite-soft" ? 0.065 : 0.05))
-        }
-      : undefined;
-  }
-  if (kind === "paint") {
-    const d = paintBristlePath(points, object.size);
-    return d
-      ? { d, opacity: 0.2, strokeWidth: Math.max(0.28, object.size * 0.07) }
-      : undefined;
-  }
-  return undefined;
+  const d = graphiteTexturePath(
+    points,
+    object.size,
+    Boolean((object.dynamics ?? DEFAULT_DYNAMICS).tiltAffectsAngle)
+  );
+  return d
+    ? {
+        d,
+        opacity: 0.3,
+        strokeWidth: Math.max(0.22, object.size * 0.065)
+      }
+    : undefined;
 }
 
 export function getInkBaseAlpha(object: Pick<InkObject, "brushId" | "tool">): number {
@@ -198,8 +201,8 @@ export function getLiveInkOpacity(object: InkLike): number {
 }
 
 /**
- * Vector pressure mask for optional pressure->opacity. Complexity is capped while
- * following the same stabilised centre line as the visible stroke.
+ * Optional pressure->opacity mask. It follows the same raw x/y centre line while
+ * using the sensor-smoothed pressure channel.
  */
 export function getPressureMaskSegments(
   object: Pick<InkObject, "points" | "dynamics" | "smoothing" | "size">,
@@ -242,6 +245,8 @@ function preparedInkPoints(object: InkLike): readonly RenderPoint[] {
     last.x.toFixed(3),
     last.y.toFixed(3),
     last.pressure.toFixed(3),
+    (last.tiltX ?? 0).toFixed(2),
+    (last.tiltY ?? 0).toFixed(2),
     last.timestamp.toFixed(1),
     (object.smoothing ?? 0.55).toFixed(3),
     object.size.toFixed(3)
@@ -265,26 +270,62 @@ function perfectFreehandPath(
     (point): [number, number, number] => [point.x, point.y, clamp01(point.pressure)]
   );
   const smooth = clamp01(smoothing);
-  const flat = kind === "marker" || kind === "highlighter";
+  const profile = strokeProfile(kind);
   const outline = getStroke(input, {
     size,
-    thinning: dynamics.pressureAffectsWidth ? thinningForKind(kind) : 0,
-    smoothing: 0.62 + smooth * 0.34,
-    streamline: 0.08 + smooth * 0.24,
+    thinning: dynamics.pressureAffectsWidth ? profile.thinning : 0,
+    smoothing: profile.smoothingBase + smooth * profile.smoothingRange,
+    streamline: profile.streamlineBase + smooth * profile.streamlineRange,
     simulatePressure: false,
     easing: (pressure) => applyPressureCurve(pressure, dynamics.pressureSensitivity),
-    start: { cap: !flat, taper: 0 },
-    end: { cap: !flat, taper: 0 },
+    start: { cap: profile.roundCaps, taper: 0 },
+    end: { cap: profile.roundCaps, taper: 0 },
     last: true
   }) as [number, number][];
-  return svgPathFromOutline(outline);
+  return svgPathFromOutline(outline, Math.max(0.35, size / 2));
 }
 
-function svgPathFromOutline(points: readonly (readonly [number, number])[]): string {
+function strokeProfile(kind: BrushKind): StrokeProfile {
+  switch (kind) {
+    case "graphite":
+      return {
+        thinning: 0.62,
+        smoothingBase: 0.5,
+        smoothingRange: 0.25,
+        streamlineBase: 0.14,
+        streamlineRange: 0.22,
+        roundCaps: true
+      };
+    case "highlighter":
+      return {
+        thinning: 0.08,
+        smoothingBase: 0.68,
+        smoothingRange: 0.2,
+        streamlineBase: 0.18,
+        streamlineRange: 0.2,
+        roundCaps: false
+      };
+    default:
+      return {
+        thinning: 0.46,
+        smoothingBase: 0.56,
+        smoothingRange: 0.28,
+        streamlineBase: 0.18,
+        streamlineRange: 0.26,
+        roundCaps: true
+      };
+  }
+}
+
+/** Official perfect-freehand SVG conversion pattern (quadratic midpoint spline). */
+function svgPathFromOutline(
+  points: readonly (readonly [number, number])[],
+  fallbackRadius: number
+): string {
   if (!points.length) return "";
   if (points.length < 4) {
     const [x, y] = points[0]!;
-    return circlePath(x, y, 0.35);
+    return circlePath(x, y, fallbackRadius);
   }
   const first = points[0]!;
   const second = points[1]!;
@@ -298,92 +339,8 @@ function svgPathFromOutline(points: readonly (readonly [number, number])[]): str
   return `${result}Z`;
 }
 
-function tiltAwareRibbonPath(
-  points: readonly RenderPoint[],
-  size: number,
-  dynamics: InkDynamics,
-  kind: BrushKind
-): string {
-  if (points.length === 1) {
-    const point = points[0]!;
-    const width = Math.max(0.2, (size * pressureWidth(point.pressure, dynamics)) / 2);
-    return circlePath(point.x, point.y, width);
-  }
-  const samples = points.map((point, index) => {
-    const previous = points[Math.max(0, index - 1)]!;
-    const next = points[Math.min(points.length - 1, index + 1)]!;
-    let tx = next.x - previous.x;
-    let ty = next.y - previous.y;
-    const length = Math.hypot(tx, ty) || 1;
-    tx /= length;
-    ty /= length;
-    const direction = Math.atan2(ty, tx);
-    const tiltX = point.tiltX ?? 0;
-    const tiltY = point.tiltY ?? 0;
-    const tipAngle = Math.hypot(tiltX, tiltY) >= 3 ? Math.atan2(tiltY, tiltX) : Math.PI / 4;
-    const projected = tipProjection(kind, tipAngle, direction);
-    return {
-      x: point.x,
-      y: point.y,
-      nx: -ty,
-      ny: tx,
-      halfWidth: Math.max(
-        0.14,
-        (size * pressureWidth(point.pressure, dynamics) * projected) / 2
-      )
-    };
-  });
-  const left = samples.map((sample) => ({
-    x: sample.x + sample.nx * sample.halfWidth,
-    y: sample.y + sample.ny * sample.halfWidth
-  }));
-  const right = samples.map((sample) => ({
-    x: sample.x - sample.nx * sample.halfWidth,
-    y: sample.y - sample.ny * sample.halfWidth
-  }));
-  const flat = kind === "marker" || kind === "highlighter";
-  let d = `M${fmt(left[0]!.x)},${fmt(left[0]!.y)} `;
-  d += smoothEdge(left);
-  const last = samples.at(-1)!;
-  if (flat) d += `L${fmt(right.at(-1)!.x)},${fmt(right.at(-1)!.y)} `;
-  else
-    d += `A${fmt(last.halfWidth)},${fmt(last.halfWidth)} 0 0 1 ${fmt(right.at(-1)!.x)},${fmt(right.at(-1)!.y)} `;
-  d += smoothEdge([...right].reverse());
-  const first = samples[0]!;
-  if (flat) d += `L${fmt(left[0]!.x)},${fmt(left[0]!.y)} `;
-  else
-    d += `A${fmt(first.halfWidth)},${fmt(first.halfWidth)} 0 0 1 ${fmt(left[0]!.x)},${fmt(left[0]!.y)} `;
-  return `${d}Z`;
-}
-
-function smoothEdge(points: readonly Point[]): string {
-  if (points.length < 2) return "";
-  let result = "";
-  for (let index = 1; index < points.length - 1; index++) {
-    const point = points[index]!;
-    const next = points[index + 1]!;
-    result += `Q${fmt(point.x)},${fmt(point.y)} ${fmt((point.x + next.x) / 2)},${fmt((point.y + next.y) / 2)} `;
-  }
-  const last = points.at(-1)!;
-  return `${result}L${fmt(last.x)},${fmt(last.y)} `;
-}
-
 function circlePath(x: number, y: number, radius: number): string {
   return `M${fmt(x - radius)},${fmt(y)} A${fmt(radius)},${fmt(radius)} 0 1 0 ${fmt(x + radius)},${fmt(y)} A${fmt(radius)},${fmt(radius)} 0 1 0 ${fmt(x - radius)},${fmt(y)} Z`;
-}
-
-function pressureWidth(pressure: number, dynamics: InkDynamics): number {
-  if (!dynamics.pressureAffectsWidth) return 1;
-  return 0.14 + applyPressureCurve(pressure, dynamics.pressureSensitivity) * 0.86;
-}
-
-function tipProjection(kind: BrushKind, tipAngle: number, direction: number): number {
-  const ratio = kind === "nib" ? 0.34 : kind === "highlighter" ? 0.5 : 0.64;
-  const delta = direction - tipAngle;
-  return Math.max(
-    ratio,
-    Math.sqrt(Math.sin(delta) ** 2 + ratio * ratio * Math.cos(delta) ** 2)
-  );
 }
 
 function averagePressureOpacity(object: InkLike): number {
@@ -398,17 +355,15 @@ function averagePressureOpacity(object: InkLike): number {
 }
 
 /**
- * Texture samples are based on geometric distance, not pointer-event count.
- * Drawing the same physical line at 100% or 500% therefore keeps comparable
- * graphite/bristle density, and previously drawn texture marks do not reshuffle
- * when a new pointer sample arrives.
+ * Pencil texture is sampled by geometric distance, never event count. With tilt
+ * enabled, graphite marks follow the stylus azimuth; otherwise they follow travel.
  */
 function graphiteTexturePath(
   points: readonly RenderPoint[],
   size: number,
-  soft: boolean
+  useTilt: boolean
 ): string {
-  const samples = resampleTexturePath(points, Math.max(4, size * (soft ? 1.7 : 2)));
+  const samples = resampleTexturePath(points, Math.max(3.6, size * 1.55));
   if (samples.length < 3) return "";
   let d = "";
   for (let index = 1; index < samples.length - 1; index++) {
@@ -417,46 +372,31 @@ function graphiteTexturePath(
     const next = samples[index + 1]!;
     let tx = next.x - previous.x;
     let ty = next.y - previous.y;
-    const length = Math.hypot(tx, ty) || 1;
-    tx /= length;
-    ty /= length;
+    const travelLength = Math.hypot(tx, ty) || 1;
+    tx /= travelLength;
+    ty /= travelLength;
+
+    if (useTilt && Math.hypot(point.tiltX ?? 0, point.tiltY ?? 0) >= 3) {
+      const angle = Math.atan2(point.tiltY ?? 0, point.tiltX ?? 0);
+      tx = Math.cos(angle);
+      ty = Math.sin(angle);
+    }
+
     const nx = -ty;
     const ny = tx;
     const noise = pseudoRandom(index * 37 + Math.round(point.x * 3) + Math.round(point.y * 5));
-    const across = (noise - 0.5) * size * 0.7;
-    const markLength = Math.max(0.65, size * (0.18 + pseudoRandom(index * 71) * 0.22));
+    const across = (noise - 0.5) * size * 0.82;
+    const pressure = 0.35 + clamp01(point.pressure) * 0.65;
+    const markLength = Math.max(
+      0.65,
+      size * pressure * (0.17 + pseudoRandom(index * 71) * 0.24)
+    );
     const x1 = point.x + nx * across - tx * markLength;
     const y1 = point.y + ny * across - ty * markLength;
     const x2 = point.x + nx * across + tx * markLength;
     const y2 = point.y + ny * across + ty * markLength;
     d += `M${fmt(x1)},${fmt(y1)} L${fmt(x2)},${fmt(y2)} `;
   }
-  return d.trim();
-}
-
-function paintBristlePath(points: readonly RenderPoint[], size: number): string {
-  const samples = resampleTexturePath(points, Math.max(2.5, size * 0.8));
-  if (samples.length < 2) return "";
-  const lanes = [-0.38, 0.38];
-  let d = "";
-  lanes.forEach((lane, laneIndex) => {
-    samples.forEach((point, index) => {
-      const previous = samples[Math.max(0, index - 1)]!;
-      const next = samples[Math.min(samples.length - 1, index + 1)]!;
-      let tx = next.x - previous.x;
-      let ty = next.y - previous.y;
-      const length = Math.hypot(tx, ty) || 1;
-      tx /= length;
-      ty /= length;
-      const nx = -ty;
-      const ny = tx;
-      const wobble = (pseudoRandom(index * 53 + laneIndex * 101) - 0.5) * 0.12;
-      const offset = size * 0.5 * (lane + wobble);
-      const x = point.x + nx * offset;
-      const y = point.y + ny * offset;
-      d += `${index ? "L" : "M"}${fmt(x)},${fmt(y)} `;
-    });
-  });
   return d.trim();
 }
 
@@ -507,24 +447,6 @@ function interpolateRenderPoint(
 function pseudoRandom(seed: number): number {
   const value = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
   return value - Math.floor(value);
-}
-
-function thinningForKind(kind: BrushKind): number {
-  switch (kind) {
-    case "highlighter":
-      return 0.1;
-    case "marker":
-      return 0.32;
-    case "graphite":
-    case "graphite-soft":
-      return 0.7;
-    case "nib":
-      return 0.78;
-    case "paint":
-      return 0.66;
-    default:
-      return 0.56;
-  }
 }
 
 function fmt(value: number): string {
