@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { resolvePointerPressure } from "./inkGestures";
+import { isTerminalPenLift, resolvePointerPressure } from "./inkGestures";
 
 describe("stylus pressure input", () => {
-  it("keeps the last contact pressure when pointer-up reports a zero-pressure tip lift", () => {
+  it("identifies a zero-pressure pointer-up as a pen lift sample", () => {
+    expect(isTerminalPenLift({ pointerType: "pen", pressure: 0 }, true)).toBe(true);
+    expect(isTerminalPenLift({ pointerType: "pen", pressure: 0.2 }, true)).toBe(false);
+    expect(isTerminalPenLift({ pointerType: "pen", pressure: 0 }, false)).toBe(false);
+  });
+
+  it("can preserve the previous contact pressure for consumers that retain a terminal sample", () => {
     expect(resolvePointerPressure({ pointerType: "pen", pressure: 0 }, 0.63, true)).toBe(0.63);
   });
 
