@@ -14,8 +14,11 @@ export type PasswordChange = { currentPassword: string; newPassword: string };
 export type ProfileChange = { displayName: string };
 export type PasskeyOptionsRequest = { name?: string };
 export type PasskeyVerification = { response: RegistrationResponseJSON };
-export type PasskeyLoginOptionsRequest = { email: string };
-export type PasskeyLoginVerification = { email: string; response: AuthenticationResponseJSON };
+export type PasskeyLoginOptionsRequest = { email?: string };
+export type PasskeyLoginVerification = {
+  email?: string;
+  response: AuthenticationResponseJSON;
+};
 export type AccountDeletion = { password: string; confirmation: string };
 export type NotebookDeletionRequest = {
   deletedAt?: number;

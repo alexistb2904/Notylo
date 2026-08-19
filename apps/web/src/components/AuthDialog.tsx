@@ -84,6 +84,11 @@ export function AuthDialog({ onClose, required = false }: { onClose(): void; req
             onChange={(event) => setEmail(event.target.value)}
             required
           />
+          {!createAccount && (
+            <small className="field-hint">
+              Facultative avec une passkey : laissez vide pour choisir un appareil enregistré.
+            </small>
+          )}
         </label>
         <label>
           Mot de passe
@@ -131,11 +136,11 @@ export function AuthDialog({ onClose, required = false }: { onClose(): void; req
         {!createAccount && window.PublicKeyCredential && (
           <button
             className="outline-action passkey-login"
-            disabled={pending || !email.trim()}
+            disabled={pending}
             type="button"
             onClick={() => void signInWithPasskey()}
           >
-            Se connecter avec une passkey
+            {pending ? "Vérification…" : "Se connecter avec une passkey"}
           </button>
         )}
         {!required && (

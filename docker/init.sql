@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS webauthn_credentials (
 CREATE INDEX IF NOT EXISTS webauthn_credentials_user_id_idx ON webauthn_credentials(user_id);
 CREATE TABLE IF NOT EXISTS webauthn_challenges (
   id UUID PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
   purpose TEXT NOT NULL CHECK (purpose IN ('registration', 'authentication')),
   challenge TEXT NOT NULL,
   label TEXT,

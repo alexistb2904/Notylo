@@ -150,17 +150,17 @@ export const api = {
       headers: { ...bearer(accessToken), "Content-Type": "application/json" },
       body: JSON.stringify({ currentPassword, newPassword })
     }),
-  passkeyLoginOptions: (email: string) =>
+  passkeyLoginOptions: (email?: string) =>
     request<Record<string, unknown>>("/auth/passkeys/login/options", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email })
+      body: JSON.stringify(email ? { email } : {})
     }),
-  passkeyLoginVerify: (email: string, response: unknown) =>
+  passkeyLoginVerify: (email: string | undefined, response: unknown) =>
     request<AuthResponse>("/auth/passkeys/login/verify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, response })
+      body: JSON.stringify({ ...(email ? { email } : {}), response })
     }),
   passkeyRegistrationOptions: (accessToken: string, name: string) =>
     request<Record<string, unknown>>("/auth/passkeys/registration/options", {

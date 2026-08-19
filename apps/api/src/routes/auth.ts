@@ -184,36 +184,44 @@ export function registerAuthRoutes(context: ApiContext): void {
     async (request, reply) => {
       const email =
         typeof request.body?.email === "string" ? request.body.email.trim().toLowerCase() : "";
-      if (!email || email.length > 254 || !/^\S+@\S+\.\S+$/.test(email))
-        return reply
-          .code(400)
-          .send({ error: "Saisissez votre adresse e-mail pour utiliser une passkey." });
+      if (email && (email.length > 254 || !/^\S+@\S+\.\S+$/.test(email)))
+        return reply.code(400).send({ error: "Saisissez une adresse e-mail valide." });
       try {
-        const user = (
-          await pool.query<Account>(
-            "SELECT id, email, display_name FROM users WHERE email = $1 LIMIT 1",
-            [email]
-          )
-        ).rows[0];
-        if (!user)
-          return reply.code(401).send({ error: "Aucune passkey ne correspond à cette adresse." });
-        const credentials = (
-          await pool.query<StoredPasskey>(
-            "SELECT id, user_id, credential_id, public_key, counter, transports, label, device_type, backed_up, created_at, last_used_at FROM webauthn_credentials WHERE user_id = $1",
-            [user.id]
-          )
-        ).rows;
-        if (!credentials.length)
-          return reply.code(401).send({ error: "Aucune passkey n’est configurée pour ce compte." });
+        let user: Account | undefined;
+        let credentials: StoredPasskey[] = [];
+        if (email) {
+          user = (
+            await pool.query<Account>(
+              "SELECT id, email, display_name FROM users WHERE email = $1 LIMIT 1",
+              [email]
+            )
+          ).rows[0];
+          if (!user)
+            return reply.code(401).send({ error: "Aucune passkey ne correspond à cette adresse." });
+          credentials = (
+            await pool.query<StoredPasskey>(
+              "SELECT id, user_id, credential_id, public_key, counter, transports, label, device_type, backed_up, created_at, last_used_at FROM webauthn_credentials WHERE user_id = $1",
+              [user.id]
+            )
+          ).rows;
+          if (!credentials.length)
+            return reply
+              .code(401)
+              .send({ error: "Aucune passkey n’est configurée pour ce compte." });
+        }
         const options = await generateAuthenticationOptions({
           rpID: context.webauthnRpId,
-          allowCredentials: credentials.map((credential) => ({
-            id: credential.credential_id,
-            transports: credential.transports
-          })),
+          ...(credentials.length
+            ? {
+                allowCredentials: credentials.map((credential) => ({
+                  id: credential.credential_id,
+                  transports: credential.transports
+                }))
+              }
+            : {}),
           userVerification: "required"
         });
-        await saveChallenge(pool, user.id, "authentication", options.challenge);
+        await saveChallenge(pool, user?.id ?? null, "authentication", options.challenge);
         return options;
       } catch (error) {
         return databaseFailure(reply, error, app.log.error.bind(app.log));
@@ -227,25 +235,44 @@ export function registerAuthRoutes(context: ApiContext): void {
       const email =
         typeof request.body?.email === "string" ? request.body.email.trim().toLowerCase() : "";
       const response = request.body?.response;
-      if (!email || !response?.id)
+      if ((email && (email.length > 254 || !/^\S+@\S+\.\S+$/.test(email))) || !response?.id)
         return reply.code(400).send({ error: "Réponse passkey invalide." });
       try {
-        const user = (
-          await pool.query<StoredUser>(
-            "SELECT id, email, password_hash, display_name FROM users WHERE email = $1 LIMIT 1",
-            [email]
-          )
-        ).rows[0];
-        if (!user) return reply.code(401).send({ error: "Cette passkey n’est pas reconnue." });
-        const challenge = await consumeChallenge(pool, user.id, "authentication");
+        let user: StoredUser | undefined;
+        if (email) {
+          user = (
+            await pool.query<StoredUser>(
+              "SELECT id, email, password_hash, display_name FROM users WHERE email = $1 LIMIT 1",
+              [email]
+            )
+          ).rows[0];
+        }
+        if (email && !user)
+          return reply.code(401).send({ error: "Cette passkey n’est pas reconnue." });
         const credential = (
           await pool.query<StoredPasskey>(
-            "SELECT id, user_id, credential_id, public_key, counter, transports, label, device_type, backed_up, created_at, last_used_at FROM webauthn_credentials WHERE user_id = $1 AND credential_id = $2 LIMIT 1",
-            [user.id, response.id]
+            user
+              ? "SELECT id, user_id, credential_id, public_key, counter, transports, label, device_type, backed_up, created_at, last_used_at FROM webauthn_credentials WHERE user_id = $1 AND credential_id = $2 LIMIT 1"
+              : "SELECT id, user_id, credential_id, public_key, counter, transports, label, device_type, backed_up, created_at, last_used_at FROM webauthn_credentials WHERE credential_id = $1 LIMIT 1",
+            user ? [user.id, response.id] : [response.id]
           )
         ).rows[0];
+        if (!user && credential) {
+          user = (
+            await pool.query<StoredUser>(
+              "SELECT id, email, password_hash, display_name FROM users WHERE id = $1 LIMIT 1",
+              [credential.user_id]
+            )
+          ).rows[0];
+        }
+        const challenge = await consumeChallenge(
+          pool,
+          email && user ? user.id : null,
+          "authentication"
+        );
         if (!challenge || !credential)
           return reply.code(401).send({ error: "La demande passkey a expiré. Réessayez." });
+        if (!user) return reply.code(401).send({ error: "Cette passkey n’est pas reconnue." });
         const verification = await verifyAuthenticationResponse({
           response,
           expectedChallenge: challenge.challenge,

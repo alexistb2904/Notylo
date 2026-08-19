@@ -18,7 +18,7 @@ type AuthState = {
   readonly cloudUnavailable: boolean;
   login(email: string, password: string): Promise<void>;
   register(email: string, password: string): Promise<void>;
-  loginWithPasskey(email: string): Promise<void>;
+  loginWithPasskey(email?: string): Promise<void>;
   continueOffline(): void;
   refreshSession(): Promise<boolean>;
   updateUser(user: Account): void;
@@ -168,13 +168,15 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     [store]
   );
   const loginWithPasskey = useCallback(
-    async (email: string) => {
+    async (email?: string) => {
       if (!window.PublicKeyCredential)
         throw new Error("Les passkeys ne sont pas prises en charge par ce navigateur.");
       const { startAuthentication } = await import("@simplewebauthn/browser");
-      const options = await api.passkeyLoginOptions(email);
+      const normalizedEmail = email?.trim().toLowerCase() || undefined;
+      const options = await api.passkeyLoginOptions(normalizedEmail);
       const response = await startAuthentication({ optionsJSON: options as never });
-      store(await api.passkeyLoginVerify(email, response));
+      store(await api.passkeyLoginVerify(normalizedEmail, response));
+      setCloudUnavailable(false);
     },
     [store]
   );

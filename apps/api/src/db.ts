@@ -16,8 +16,9 @@ export async function ensureSchema(pool: Pool): Promise<void> {
     "CREATE INDEX IF NOT EXISTS webauthn_credentials_user_id_idx ON webauthn_credentials(user_id)"
   );
   await pool.query(
-    "CREATE TABLE IF NOT EXISTS webauthn_challenges (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, purpose TEXT NOT NULL CHECK (purpose IN ('registration', 'authentication')), challenge TEXT NOT NULL, label TEXT, expires_at TIMESTAMPTZ NOT NULL)"
+    "CREATE TABLE IF NOT EXISTS webauthn_challenges (id UUID PRIMARY KEY, user_id UUID REFERENCES users(id) ON DELETE CASCADE, purpose TEXT NOT NULL CHECK (purpose IN ('registration', 'authentication')), challenge TEXT NOT NULL, label TEXT, expires_at TIMESTAMPTZ NOT NULL)"
   );
+  await pool.query("ALTER TABLE webauthn_challenges ALTER COLUMN user_id DROP NOT NULL");
   await pool.query(
     "CREATE INDEX IF NOT EXISTS webauthn_challenges_user_purpose_idx ON webauthn_challenges(user_id, purpose)"
   );
@@ -67,15 +68,22 @@ export async function lockNotebook(client: PoolClient, notebookId: string): Prom
 
 export async function saveChallenge(
   pool: Pool,
-  userId: string,
+  userId: string | null,
   purpose: "registration" | "authentication",
   challenge: string,
   label?: string
 ): Promise<void> {
-  await pool.query(
-    "DELETE FROM webauthn_challenges WHERE (user_id = $1 AND purpose = $2) OR expires_at < now()",
-    [userId, purpose]
-  );
+  if (userId) {
+    await pool.query(
+      "DELETE FROM webauthn_challenges WHERE (user_id = $1 AND purpose = $2) OR expires_at < now()",
+      [userId, purpose]
+    );
+  } else {
+    await pool.query(
+      "DELETE FROM webauthn_challenges WHERE (user_id IS NULL AND purpose = $1) OR expires_at < now()",
+      [purpose]
+    );
+  }
   await pool.query(
     "INSERT INTO webauthn_challenges (id, user_id, purpose, challenge, label, expires_at) VALUES ($1, $2, $3, $4, $5, now() + interval '5 minutes')",
     [crypto.randomUUID(), userId, purpose, challenge, label ?? null]
@@ -84,12 +92,14 @@ export async function saveChallenge(
 
 export async function consumeChallenge(
   pool: Pool,
-  userId: string,
+  userId: string | null,
   purpose: "registration" | "authentication"
 ) {
+  const userFilter = userId ? "user_id = $1" : "user_id IS NULL";
+  const params = userId ? [userId, purpose] : [purpose];
   const result = await pool.query<{ challenge: string; label: string | null }>(
-    "DELETE FROM webauthn_challenges WHERE id = (SELECT id FROM webauthn_challenges WHERE user_id = $1 AND purpose = $2 AND expires_at > now() ORDER BY expires_at DESC LIMIT 1) RETURNING challenge, label",
-    [userId, purpose]
+    `DELETE FROM webauthn_challenges WHERE id = (SELECT id FROM webauthn_challenges WHERE ${userFilter} AND purpose = $${userId ? 2 : 1} AND expires_at > now() ORDER BY expires_at DESC LIMIT 1) RETURNING challenge, label`,
+    params
   );
   return result.rows[0];
 }
