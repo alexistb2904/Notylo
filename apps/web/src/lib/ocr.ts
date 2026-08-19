@@ -1,7 +1,7 @@
 import type { Worker } from "tesseract.js";
 import type { DocumentObject, ImageObject } from "@notylo/document-model";
 import { NotebookRepository } from "@notylo/persistence";
-import { drawInk } from "../components/canvas/drawInk";
+import { drawInkToCanvas } from "../components/canvas/inkVector";
 
 export type OcrMode = "text" | "math";
 
@@ -83,7 +83,9 @@ export async function renderOcrSelection(selected: readonly DocumentObject[]): P
 
   for (const object of objects) {
     if (object.type === "ink") {
-      drawInk(context, object, offset, true);
+      // OCR rasterisation deliberately uses the same vector outline as the editor,
+      // so a selected handwritten expression is recognized from what the user saw.
+      drawInkToCanvas(context, object, offset);
       continue;
     }
     await drawImageObject(context, object, offset);
