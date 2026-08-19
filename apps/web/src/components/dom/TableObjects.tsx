@@ -1,5 +1,6 @@
 import type { DocumentObject } from "@notylo/document-model";
 import type { DOMObjectUpdate } from "./types";
+import { t } from "../../i18n";
 
 export function NoteTable({
   object,
@@ -30,11 +31,7 @@ export function NoteTable({
                         )
                       : sourceRow
                   );
-                  onUpdate(
-                    object,
-                    { ...object, rows, updatedAt: Date.now() },
-                    "Modifier le tableau"
-                  );
+                  onUpdate(object, { ...object, rows, updatedAt: Date.now() }, t("dom.editTable"));
                 }}
                 style={{
                   background:
@@ -106,7 +103,7 @@ export function Spreadsheet({
                             cells: { ...object.cells, [key]: value },
                             updatedAt: Date.now()
                           },
-                          "Modifier la feuille"
+                          t("dom.editSheet")
                         );
                     }}
                   >
