@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { appendInkPoint, compactInkPoints } from "./ink";
+import { appendInkPoint, captureSpacingForZoom, compactInkPoints } from "./ink";
 import {
   applyPressureCurve,
   getDabDynamics,
+  prepareStrokeSamples,
   stabilizeInkPath,
   visibleInkRuns
 } from "../components/canvas/drawInk";
 
-const point = (x: number, y: number, pressure = 0.5) => ({ x, y, pressure, timestamp: 0 });
+const point = (x: number, y: number, pressure = 0.5, timestamp = 0) => ({
+  x,
+  y,
+  pressure,
+  timestamp
+});
 
 describe("ink sampling", () => {
   it("uses a linear pressure curve at normal sensitivity and softer response above it", () => {
@@ -44,6 +50,11 @@ describe("ink sampling", () => {
     expect(points).toHaveLength(2);
   });
 
+  it("adapts capture density to zoom instead of collecting invisible samples", () => {
+    expect(captureSpacingForZoom(0.1, 2)).toBeGreaterThan(captureSpacingForZoom(1, 2));
+    expect(captureSpacingForZoom(1, 2)).toBeGreaterThan(captureSpacingForZoom(8, 2));
+  });
+
   it("compacts a dense straight segment without rounding a corner", () => {
     const points = [
       point(0, 0),
@@ -61,21 +72,26 @@ describe("ink sampling", () => {
   });
 
   it("turns a 100% stabilised corner into a curve rather than an abrupt angle", () => {
-    const source = [point(0, 0), point(80, 0), point(80, 80)];
+    const source = [point(0, 0, 0.5, 0), point(80, 0, 0.5, 20), point(80, 80, 0.5, 40)];
     const result = stabilizeInkPath(source, 1, true);
     expect(result.at(-1)).toMatchObject({ x: 80, y: 80 });
-    // At least one catch-up point must occupy the inside of the corner. A
-    // direct polyline would only contain y=0 or x=80 before its last point.
     expect(result.some((item) => item.x < 79 && item.y > 1)).toBe(true);
   });
 
   it("never leaves the convex hull of the user's input", () => {
     const source = [point(0, 0), point(80, 0), point(80, 80)];
     const result = stabilizeInkPath(source, 1, true);
-    // The input's convex hull is the triangle 0 <= y <= x <= 80. A predictive
-    // filter can overshoot it; a Krita-style moving average cannot.
     expect(result.every((item) => item.y >= 0 && item.y <= item.x + 1e-8 && item.x <= 80)).toBe(
       true
     );
+  });
+
+  it("caps live geometry while preserving the final stylus position", () => {
+    const source = Array.from({ length: 5000 }, (_, index) =>
+      point(index * 0.25, Math.sin(index / 20) * 20, 0.5, index * 4)
+    );
+    const samples = prepareStrokeSamples(source, 0.55, 3, false, "economy");
+    expect(samples.length).toBeLessThanOrEqual(261);
+    expect(samples.at(-1)).toMatchObject({ x: source.at(-1)!.x, y: source.at(-1)!.y });
   });
 });

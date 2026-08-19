@@ -1,5 +1,6 @@
 import type { InkDynamics, PageBackground } from "@notylo/document-model";
 import type { OcrMode } from "../lib/ocr";
+import type { EraserMode } from "../lib/eraser";
 import type { Tool } from "./editor/types";
 import {
   Calculator,
@@ -29,6 +30,8 @@ export function Inspector({
   isWhiteboard,
   pageGap,
   stylusOnly,
+  eraserMode,
+  eraserSize,
   onColor,
   onSize,
   onSmoothing,
@@ -41,6 +44,8 @@ export function Inspector({
   onAutoCalculate,
   onOcr,
   onStylusOnly,
+  onEraserMode,
+  onEraserSize,
   onClose,
   ocrBusy,
   ocrStatus
@@ -58,6 +63,8 @@ export function Inspector({
   readonly isWhiteboard: boolean;
   readonly pageGap: number;
   readonly stylusOnly: boolean;
+  readonly eraserMode: EraserMode;
+  readonly eraserSize: number;
   onColor(value: string): void;
   onSize(value: number): void;
   onSmoothing(value: number): void;
@@ -70,6 +77,8 @@ export function Inspector({
   onAutoCalculate(value: boolean): void;
   onOcr(mode: OcrMode): void;
   onStylusOnly(value: boolean): void;
+  onEraserMode(value: EraserMode): void;
+  onEraserSize(value: number): void;
   onClose(): void;
   readonly ocrBusy: boolean;
   readonly ocrStatus: string | undefined;
@@ -81,6 +90,7 @@ export function Inspector({
   };
   const updateBackground = (change: Partial<PageBackground>) =>
     onWhiteboardBackground({ ...background, ...change });
+  const isInkTool = tool === "pen" || tool === "pencil" || tool === "highlighter";
   return (
     <aside className="inspector">
       <div className="inspector-heading">
@@ -96,7 +106,9 @@ export function Inspector({
                 ? "Crayon"
                 : tool === "highlighter"
                   ? "Surligneur"
-                  : "Espace"}
+                  : tool === "eraser"
+                    ? "Gomme"
+                    : "Espace"}
           </h2>
         </div>
         <button className="inspector-close" onClick={onClose} aria-label="Fermer les réglages">
@@ -104,46 +116,88 @@ export function Inspector({
         </button>
       </div>
       <section className="settings-section" aria-labelledby="stroke-settings">
-        <h3 id="stroke-settings">Trait</h3>
-        <label className="property-label color-property">
-          <span>
-            <Palette size={14} /> Couleur
-          </span>
-          <input type="color" value={color} onChange={(event) => onColor(event.target.value)} />
-        </label>
-        <label className="property-label range-property">
-          <span>Épaisseur</span>
-          <strong>{size.toFixed(1)} px</strong>
-          <input
-            type="range"
-            min="1"
-            max="14"
-            step="0.2"
-            value={size}
-            onChange={(event) => onSize(Number(event.target.value))}
-          />
-        </label>
-        <label className="property-label range-property">
-          <span>Lissage</span>
-          <strong>{Math.round(smoothing * 100)}%</strong>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={smoothing}
-            onChange={(event) => onSmoothing(Number(event.target.value))}
-          />
-        </label>
-        <label className="toggle-row compact-toggle">
-          <span>Palette flottante</span>
-          <input
-            aria-label="Afficher la palette flottante"
-            type="checkbox"
-            checked={paletteVisible}
-            onChange={(event) => onPaletteVisible(event.target.checked)}
-          />
-        </label>
+        <h3 id="stroke-settings">{tool === "eraser" ? "Gomme" : "Trait"}</h3>
+        {tool === "eraser" ? (
+          <>
+            <div className="setting-copy">
+              <span>
+                <strong>Mode</strong>
+                <small>
+                  Objet entier supprime le bloc touché. Gomme précise découpe uniquement l’encre.
+                </small>
+                <div className="three-way">
+                  <button
+                    aria-pressed={eraserMode === "object"}
+                    onClick={() => onEraserMode("object")}
+                  >
+                    Objet entier
+                  </button>
+                  <button
+                    aria-pressed={eraserMode === "precision"}
+                    onClick={() => onEraserMode("precision")}
+                  >
+                    Gomme précise
+                  </button>
+                </div>
+              </span>
+            </div>
+            <label className="property-label range-property">
+              <span>Taille</span>
+              <strong>{Math.round(eraserSize)} px</strong>
+              <input
+                aria-label="Taille de la gomme"
+                type="range"
+                min="4"
+                max="72"
+                step="1"
+                value={eraserSize}
+                onChange={(event) => onEraserSize(Number(event.target.value))}
+              />
+            </label>
+          </>
+        ) : (
+          <>
+            <label className="property-label color-property">
+              <span>
+                <Palette size={14} /> Couleur
+              </span>
+              <input type="color" value={color} onChange={(event) => onColor(event.target.value)} />
+            </label>
+            <label className="property-label range-property">
+              <span>Épaisseur</span>
+              <strong>{size.toFixed(1)} px</strong>
+              <input
+                type="range"
+                min="1"
+                max="14"
+                step="0.2"
+                value={size}
+                onChange={(event) => onSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="property-label range-property">
+              <span>Lissage</span>
+              <strong>{Math.round(smoothing * 100)}%</strong>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={smoothing}
+                onChange={(event) => onSmoothing(Number(event.target.value))}
+              />
+            </label>
+            <label className="toggle-row compact-toggle">
+              <span>Palette flottante</span>
+              <input
+                aria-label="Afficher la palette flottante"
+                type="checkbox"
+                checked={paletteVisible}
+                onChange={(event) => onPaletteVisible(event.target.checked)}
+              />
+            </label>
+          </>
+        )}
         {!isWhiteboard && (
           <label className="property-label range-property">
             <span>Espacement des pages</span>
@@ -159,81 +213,83 @@ export function Inspector({
           </label>
         )}
       </section>
-      <section className="settings-section pressure-settings" aria-labelledby="pressure-settings">
-        <div className="section-title-row">
-          <h3 id="pressure-settings">Pression du stylet</h3>
-          <span className="tablet-status">STYLET</span>
-        </div>
-        <label className="property-label range-property">
-          <span>Sensibilité</span>
-          <strong>
-            {dynamics.pressureSensitivity < 0.4
-              ? "Ferme"
-              : dynamics.pressureSensitivity > 0.6
-                ? "Souple"
-                : "Normale"}
-          </strong>
-          <input
-            aria-label="Sensibilité de la pression du stylet"
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={dynamics.pressureSensitivity}
-            onChange={(event) =>
-              onDynamics({ ...dynamics, pressureSensitivity: Number(event.target.value) })
-            }
-          />
-          <span className="pressure-scale" aria-hidden="true">
-            <small>Ferme</small>
-            <small>Souple</small>
-          </span>
-        </label>
-        <div className="dynamics-list">
-          <label className="toggle-row compact-toggle">
-            <span>
-              <strong>Largeur</strong>
-              <small>La pression module l’épaisseur.</small>
-            </span>
+      {isInkTool && (
+        <section className="settings-section pressure-settings" aria-labelledby="pressure-settings">
+          <div className="section-title-row">
+            <h3 id="pressure-settings">Pression du stylet</h3>
+            <span className="tablet-status">STYLET</span>
+          </div>
+          <label className="property-label range-property">
+            <span>Sensibilité</span>
+            <strong>
+              {dynamics.pressureSensitivity < 0.4
+                ? "Ferme"
+                : dynamics.pressureSensitivity > 0.6
+                  ? "Souple"
+                  : "Normale"}
+            </strong>
             <input
-              aria-label="La pression change la largeur"
-              type="checkbox"
-              checked={dynamics.pressureAffectsWidth}
+              aria-label="Sensibilité de la pression du stylet"
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={dynamics.pressureSensitivity}
               onChange={(event) =>
-                onDynamics({ ...dynamics, pressureAffectsWidth: event.target.checked })
+                onDynamics({ ...dynamics, pressureSensitivity: Number(event.target.value) })
               }
             />
-          </label>
-          <label className="toggle-row compact-toggle">
-            <span>
-              <strong>Opacité</strong>
-              <small>Un appui léger dépose moins de matière.</small>
+            <span className="pressure-scale" aria-hidden="true">
+              <small>Ferme</small>
+              <small>Souple</small>
             </span>
-            <input
-              aria-label="La pression change l’opacité"
-              type="checkbox"
-              checked={dynamics.pressureAffectsOpacity}
-              onChange={(event) =>
-                onDynamics({ ...dynamics, pressureAffectsOpacity: event.target.checked })
-              }
-            />
           </label>
-          <label className="toggle-row compact-toggle">
-            <span>
-              <strong>Angle</strong>
-              <small>L’inclinaison oriente la pointe et les soies.</small>
-            </span>
-            <input
-              aria-label="L’inclinaison du stylet change l’angle"
-              type="checkbox"
-              checked={dynamics.tiltAffectsAngle}
-              onChange={(event) =>
-                onDynamics({ ...dynamics, tiltAffectsAngle: event.target.checked })
-              }
-            />
-          </label>
-        </div>
-      </section>
+          <div className="dynamics-list">
+            <label className="toggle-row compact-toggle">
+              <span>
+                <strong>Largeur</strong>
+                <small>La pression module l’épaisseur.</small>
+              </span>
+              <input
+                aria-label="La pression change la largeur"
+                type="checkbox"
+                checked={dynamics.pressureAffectsWidth}
+                onChange={(event) =>
+                  onDynamics({ ...dynamics, pressureAffectsWidth: event.target.checked })
+                }
+              />
+            </label>
+            <label className="toggle-row compact-toggle">
+              <span>
+                <strong>Opacité</strong>
+                <small>Un appui léger dépose moins de matière.</small>
+              </span>
+              <input
+                aria-label="La pression change l’opacité"
+                type="checkbox"
+                checked={dynamics.pressureAffectsOpacity}
+                onChange={(event) =>
+                  onDynamics({ ...dynamics, pressureAffectsOpacity: event.target.checked })
+                }
+              />
+            </label>
+            <label className="toggle-row compact-toggle">
+              <span>
+                <strong>Angle</strong>
+                <small>L’inclinaison oriente la pointe et les soies.</small>
+              </span>
+              <input
+                aria-label="L’inclinaison du stylet change l’angle"
+                type="checkbox"
+                checked={dynamics.tiltAffectsAngle}
+                onChange={(event) =>
+                  onDynamics({ ...dynamics, tiltAffectsAngle: event.target.checked })
+                }
+              />
+            </label>
+          </div>
+        </section>
+      )}
       <section className="settings-section" aria-labelledby="workspace-settings">
         <h3 id="workspace-settings">Espace de travail</h3>
         <div className="setting-copy">
@@ -288,7 +344,7 @@ export function Inspector({
             </span>
             <span>
               <strong>Écriture au stylet uniquement</strong>
-              <small>Le doigt déplace le canvas, mais ne peut pas créer de trait.</small>
+              <small>Le doigt déplace le canvas, mais ne peut ni écrire ni gommer.</small>
             </span>
           </span>
           <input
@@ -377,6 +433,15 @@ export function Inspector({
             {ocrStatus}
           </p>
         )}
+      </section>
+      <section className="settings-section" aria-labelledby="help-settings">
+        <h3 id="help-settings">Astuce</h3>
+        <div className="setting-copy">
+          <span className="setting-icon">
+            <CircleHelp size={14} />
+          </span>
+          <small>La gomme précise agit uniquement sur les traits d’encre et laisse texte, images et PDF intacts.</small>
+        </div>
       </section>
     </aside>
   );

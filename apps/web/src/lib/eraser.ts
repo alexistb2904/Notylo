@@ -1,5 +1,6 @@
 import type { Point, Rect } from "@notylo/canvas-engine";
 import type { DocumentObject, InkObject, InkPoint } from "@notylo/document-model";
+import { compactInkPoints } from "./ink";
 
 export type EraserMode = "object" | "precision";
 
@@ -10,9 +11,9 @@ export interface EraserResult {
 
 /**
  * Builds one reversible replacement operation for an entire eraser gesture.
- * `source` must be the document state captured when the pointer went down; the
- * result can therefore be recomputed for live previews without accumulating
- * floating-point cuts or polluting undo history.
+ * `source` is the immutable surface state captured at pointer-down. Rebuilding
+ * from that source on every preview prevents cumulative floating-point cuts and
+ * keeps the whole held gesture as one undoable operation.
  */
 export function eraseObjects(
   source: readonly DocumentObject[],
@@ -22,7 +23,7 @@ export function eraseObjects(
 ): EraserResult {
   if (!path.length) return { before: [], after: [] };
   const radius = Math.max(1, diameter / 2);
-  const gestureBounds = boundsForPath(path, radius + 24);
+  const gestureBounds = eraserGestureBounds(path, diameter, 24);
   const before: DocumentObject[] = [];
   const after: DocumentObject[] = [];
 
@@ -49,6 +50,16 @@ export function eraseObjects(
   return { before, after };
 }
 
+/** Bounding box suitable for querying a spatial index for one held gesture. */
+export function eraserGestureBounds(
+  path: readonly Point[],
+  diameter: number,
+  extraPadding = 64
+): Rect {
+  if (!path.length) return { x: 0, y: 0, width: 0, height: 0 };
+  return boundsForPath(path, Math.max(1, diameter / 2) + Math.max(0, extraPadding));
+}
+
 /** Splits one ink object into the portions that remain outside the eraser. */
 export function eraseInkStroke(
   ink: InkObject,
@@ -56,8 +67,7 @@ export function eraseInkStroke(
   radius: number
 ): readonly InkObject[] {
   if (!ink.points.length || !eraserPath.length) return [ink];
-  const spacing = Math.max(0.7, Math.min(3, radius * 0.2));
-  const samples = resampleInkPoints(ink.points, spacing);
+  const samples = localizedInkSamples(ink, eraserPath, Math.max(1, radius));
   if (!samples.length) return [ink];
 
   const erased = samples.map((point) =>
@@ -80,16 +90,80 @@ export function eraseInkStroke(
   }
   if (current.length) runs.push(current);
 
+  const tolerance = Math.max(0.16, Math.min(0.5, ink.size * 0.055));
   return runs
+    .map((run) => compactInkPoints(run, tolerance))
     .filter((run) => run.length >= 2 || (run.length === 1 && ink.points.length === 1))
     .map((run, index) => fragmentInk(ink, run, index));
+}
+
+function localizedInkSamples(
+  ink: InkObject,
+  eraserPath: readonly Point[],
+  radius: number
+): InkPoint[] {
+  if (ink.points.length <= 1) return [...ink.points];
+  const result: InkPoint[] = [{ ...ink.points[0]! }];
+  const preferredSpacing = Math.max(0.55, Math.min(2.4, radius * 0.18));
+  const gestureBounds = boundsForPath(eraserPath, radius + ink.size);
+
+  for (let index = 1; index < ink.points.length; index++) {
+    const start = ink.points[index - 1]!;
+    const end = ink.points[index]!;
+    const length = Math.hypot(end.x - start.x, end.y - start.y);
+    if (length < 1e-9) {
+      appendDistinct(result, end);
+      continue;
+    }
+
+    const segmentRect = expandRect(segmentBounds(start, end), radius + ink.size);
+    if (!rectsIntersect(segmentRect, gestureBounds)) {
+      appendDistinct(result, end);
+      continue;
+    }
+    const localPath = pathNearRect(eraserPath, segmentRect);
+    if (!localPath.length) {
+      appendDistinct(result, end);
+      continue;
+    }
+
+    let minimumT = 1;
+    let maximumT = 0;
+    for (const point of localPath) {
+      const projection = projectParameter(point, start, end);
+      minimumT = Math.min(minimumT, projection);
+      maximumT = Math.max(maximumT, projection);
+    }
+    const margin =
+      (radius + Math.max(inkHalfWidth(ink, start), inkHalfWidth(ink, end))) / length;
+    const fromT = Math.max(0, minimumT - margin);
+    const toT = Math.min(1, maximumT + margin);
+    if (toT <= fromT) {
+      appendDistinct(result, end);
+      continue;
+    }
+
+    if (fromT > 0) appendDistinct(result, interpolateInkPoint(start, end, fromT));
+    const localLength = length * (toT - fromT);
+    const steps = Math.max(1, Math.min(96, Math.ceil(localLength / preferredSpacing)));
+    for (let step = 1; step < steps; step++) {
+      const t = fromT + ((toT - fromT) * step) / steps;
+      appendDistinct(result, interpolateInkPoint(start, end, t));
+    }
+    appendDistinct(result, interpolateInkPoint(start, end, toT));
+    if (toT < 1) appendDistinct(result, end);
+  }
+  return result;
 }
 
 function fragmentInk(ink: InkObject, points: readonly InkPoint[], index: number): InkObject {
   const bounds = pointsBounds(points);
   return {
     ...ink,
-    id: index === 0 ? ink.id : `${ink.id}_cut_${index}`,
+    // Fragment zero keeps the original identity. Siblings include the source
+    // stroke version, preventing collisions when the same stroke is cut again
+    // in a later gesture while remaining stable throughout the current preview.
+    id: index === 0 ? ink.id : `${ink.id}_cut_${ink.updatedAt}_${index}`,
     points,
     ...bounds,
     updatedAt: Date.now()
@@ -102,8 +176,7 @@ function objectIntersectsEraser(
   radius: number
 ): boolean {
   if (object.type === "ink") {
-    const spacing = Math.max(1, Math.min(5, radius * 0.28));
-    return resampleInkPoints(object.points, spacing).some(
+    return localizedInkSamples(object, path, radius).some(
       (point) => distanceToPolyline(point, path) <= radius + inkHalfWidth(object, point)
     );
   }
@@ -121,7 +194,6 @@ function inkHalfWidth(ink: InkObject, point: Pick<InkPoint, "pressure">): number
   const pressure = pressureCurve(point.pressure, dynamics.pressureSensitivity);
   return (ink.size * (0.14 + pressure * 0.86)) / 2;
 }
-
 function pressureCurve(pressure: number, sensitivity: number): number {
   const input = Math.min(1, Math.max(0, pressure));
   const setting = Math.min(1, Math.max(0, sensitivity));
@@ -131,16 +203,16 @@ function pressureCurve(pressure: number, sensitivity: number): number {
 export function appendEraserPoint(path: Point[], point: Point, diameter: number): void {
   const previous = path.at(-1);
   const minimum = Math.max(0.6, Math.min(4, diameter * 0.12));
-  if (!previous || Math.hypot(point.x - previous.x, point.y - previous.y) >= minimum) path.push(point);
+  if (!previous || Math.hypot(point.x - previous.x, point.y - previous.y) >= minimum)
+    path.push(point);
 }
 
 export function distanceToPolyline(point: Point, path: readonly Point[]): number {
   if (!path.length) return Number.POSITIVE_INFINITY;
   if (path.length === 1) return Math.hypot(point.x - path[0]!.x, point.y - path[0]!.y);
   let minimum = Number.POSITIVE_INFINITY;
-  for (let index = 1; index < path.length; index++) {
+  for (let index = 1; index < path.length; index++)
     minimum = Math.min(minimum, distanceToSegment(point, path[index - 1]!, path[index]!));
-  }
   return minimum;
 }
 
@@ -152,57 +224,36 @@ function pathNearRect(path: readonly Point[], rect: Rect): Point[] {
   for (let index = 1; index < path.length; index++) {
     const start = path[index - 1]!;
     const end = path[index]!;
-    const segmentBounds = {
-      x: Math.min(start.x, end.x),
-      y: Math.min(start.y, end.y),
-      width: Math.abs(end.x - start.x),
-      height: Math.abs(end.y - start.y)
-    };
-    if (!rectsIntersect(segmentBounds, rect)) continue;
+    if (!rectsIntersect(segmentBounds(start, end), rect)) continue;
     if (first < 0) first = index - 1;
     last = index;
   }
   if (first < 0 || last < 0) return [];
-  // Keep the contiguous original sub-path between the first and last nearby
-  // segments. Joining disjoint clipped pieces would invent a shortcut segment
-  // through the object and could erase ink the pointer never crossed.
   return path.slice(first, last + 1).map((point) => ({ ...point }));
 }
 
-function distanceToSegment(point: Point, start: Point, end: Point): number {
+function projectParameter(point: Point, start: Point, end: Point): number {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
   const lengthSquared = dx * dx + dy * dy;
-  const t = lengthSquared
-    ? Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared))
-    : 0;
-  return Math.hypot(point.x - (start.x + dx * t), point.y - (start.y + dy * t));
+  if (!lengthSquared) return 0;
+  return Math.max(
+    0,
+    Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared)
+  );
 }
-
-function resampleInkPoints(points: readonly InkPoint[], spacing: number): InkPoint[] {
-  if (points.length <= 1) return [...points];
-  const result: InkPoint[] = [{ ...points[0]! }];
-  let start: InkPoint = { ...points[0]! };
-  let carried = 0;
-  for (let index = 1; index < points.length; index++) {
-    const target = points[index]!;
-    let distance = Math.hypot(target.x - start.x, target.y - start.y);
-    while (distance + carried >= spacing && distance > 0) {
-      const ratio = (spacing - carried) / distance;
-      start = interpolateInkPoint(start, target, ratio);
-      result.push(start);
-      carried = 0;
-      distance = Math.hypot(target.x - start.x, target.y - start.y);
-    }
-    carried += distance;
-    start = { ...target };
-  }
-  const final = points.at(-1)!;
-  const last = result.at(-1)!;
-  if (Math.hypot(final.x - last.x, final.y - last.y) > 0.001) result.push({ ...final });
-  return result;
+function distanceToSegment(point: Point, start: Point, end: Point): number {
+  const t = projectParameter(point, start, end);
+  return Math.hypot(
+    point.x - (start.x + (end.x - start.x) * t),
+    point.y - (start.y + (end.y - start.y) * t)
+  );
 }
-
+function appendDistinct(points: InkPoint[], point: InkPoint): void {
+  const previous = points.at(-1);
+  if (!previous || Math.hypot(point.x - previous.x, point.y - previous.y) > 1e-6)
+    points.push(point);
+}
 function interpolateInkPoint(start: InkPoint, end: InkPoint, ratio: number): InkPoint {
   const mix = (a: number | undefined, b: number | undefined) =>
     (a ?? 0) + ((b ?? 0) - (a ?? 0)) * ratio;
@@ -215,7 +266,6 @@ function interpolateInkPoint(start: InkPoint, end: InkPoint, ratio: number): Ink
     timestamp: mix(start.timestamp, end.timestamp)
   };
 }
-
 function pointsBounds(points: readonly Point[]): Rect {
   let left = Number.POSITIVE_INFINITY;
   let top = Number.POSITIVE_INFINITY;
@@ -234,16 +284,20 @@ function pointsBounds(points: readonly Point[]): Rect {
     height: Math.max(1, bottom - top)
   };
 }
-
-function boundsForPath(path: readonly Point[], padding: number): Rect {
-  const bounds = pointsBounds(path);
-  return expandRect(bounds, padding);
+function segmentBounds(start: Point, end: Point): Rect {
+  return {
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    width: Math.max(0.001, Math.abs(end.x - start.x)),
+    height: Math.max(0.001, Math.abs(end.y - start.y))
+  };
 }
-
+function boundsForPath(path: readonly Point[], padding: number): Rect {
+  return expandRect(pointsBounds(path), padding);
+}
 function objectBounds(object: DocumentObject): Rect {
   return { x: object.x, y: object.y, width: object.width, height: object.height };
 }
-
 function expandRect(rect: Rect, amount: number): Rect {
   return {
     x: rect.x - amount,
@@ -252,15 +306,22 @@ function expandRect(rect: Rect, amount: number): Rect {
     height: rect.height + amount * 2
   };
 }
-
 function rectsIntersect(a: Rect, b: Rect): boolean {
-  return a.x <= b.x + b.width && a.x + a.width >= b.x && a.y <= b.y + b.height && a.y + a.height >= b.y;
+  return (
+    a.x <= b.x + b.width &&
+    a.x + a.width >= b.x &&
+    a.y <= b.y + b.height &&
+    a.y + a.height >= b.y
+  );
 }
-
 function pointInRect(point: Point, rect: Rect): boolean {
-  return point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height;
+  return (
+    point.x >= rect.x &&
+    point.x <= rect.x + rect.width &&
+    point.y >= rect.y &&
+    point.y <= rect.y + rect.height
+  );
 }
-
 function segmentIntersectsRect(start: Point, end: Point, rect: Rect): boolean {
   if (pointInRect(start, rect) || pointInRect(end, rect)) return true;
   const corners = [
@@ -274,7 +335,6 @@ function segmentIntersectsRect(start: Point, end: Point, rect: Rect): boolean {
   }
   return false;
 }
-
 function segmentsIntersect(a: Point, b: Point, c: Point, d: Point): boolean {
   const cross = (p: Point, q: Point, r: Point) =>
     (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);

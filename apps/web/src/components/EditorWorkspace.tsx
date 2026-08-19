@@ -19,6 +19,7 @@ import {
   type Rect
 } from "@notylo/canvas-engine";
 import {
+  applyOperation,
   createId,
   transformObject,
   type DocumentObject,
@@ -37,7 +38,14 @@ import {
 } from "../lib/factories";
 import type { SaveState } from "../lib/session";
 import { webPlatform } from "../lib/platform";
-import { compactInkPoints } from "../lib/ink";
+import { captureSpacingForZoom, compactInkPoints } from "../lib/ink";
+import {
+  appendEraserPoint,
+  eraseObjects,
+  eraserGestureBounds,
+  type EraserMode,
+  type EraserResult
+} from "../lib/eraser";
 import { isApproximatelyStraight } from "../lib/straight-line";
 import { CanvasLayer } from "./CanvasLayer";
 import { DOMObject } from "./DOMObject";
@@ -99,6 +107,12 @@ interface Props {
   readonly onRedo: () => void;
   readonly onReplace: (updater: (current: NotebookDocument) => NotebookDocument) => void;
 }
+interface EraserGestureState {
+  readonly baseDocument: NotebookDocument;
+  readonly path: Point[];
+  readonly sourceIndex: CanvasEngine;
+  result: EraserResult;
+}
 const INTERNAL_CLIPBOARD = "application/x-notylo-objects";
 const STRAIGHTEN_DELAY_MS = 2_000;
 const STRAIGHTEN_STILLNESS_PX = 4;
@@ -130,6 +144,12 @@ export function EditorWorkspace(props: Props) {
     pressureAffectsOpacity: readStoredBoolean("notylo-pressure-opacity", false),
     tiltAffectsAngle: readStoredBoolean("notylo-tilt-angle", false)
   }));
+  const [eraserMode, setEraserMode] = useState<EraserMode>(() =>
+    localStorage.getItem("notylo-eraser-mode") === "precision" ? "precision" : "object"
+  );
+  const [eraserSize, setEraserSize] = useState(() =>
+    readStoredNumber("notylo-eraser-size", 18, 4, 72)
+  );
   const [showPalette, setShowPalette] = useState(() =>
     readStoredBoolean("notylo-floating-palette", true)
   );
@@ -163,6 +183,8 @@ export function EditorWorkspace(props: Props) {
   const draftRef = useRef<DraftInk | undefined>(undefined);
   const shapeDraftRef = useRef<ShapeObject | undefined>(undefined);
   const straightenGestureRef = useRef<StraightenGesture | undefined>(undefined);
+  const eraserGestureRef = useRef<EraserGestureState | undefined>(undefined);
+  const eraserLastApplyAt = useRef(0);
   const dragRef = useRef<DragState | undefined>(undefined);
   const resizePointRef = useRef<Point | undefined>(undefined);
   const penRecentAt = useRef(0);
@@ -228,6 +250,8 @@ export function EditorWorkspace(props: Props) {
   );
   useEffect(() => localStorage.setItem("notylo-stylus-only", String(stylusOnly)), [stylusOnly]);
   useEffect(() => localStorage.setItem("notylo-brush-id", brushId), [brushId]);
+  useEffect(() => localStorage.setItem("notylo-eraser-mode", eraserMode), [eraserMode]);
+  useEffect(() => localStorage.setItem("notylo-eraser-size", String(eraserSize)), [eraserSize]);
   useEffect(() => {
     localStorage.setItem("notylo-pressure-sensitivity", String(inkDynamics.pressureSensitivity));
     localStorage.setItem("notylo-pressure-width", String(inkDynamics.pressureAffectsWidth));
@@ -330,6 +354,39 @@ export function EditorWorkspace(props: Props) {
     },
     [document.notebook.mode, document.pages]
   );
+
+  const previewEraserGesture = () => {
+    const gesture = eraserGestureRef.current;
+    if (!gesture) return;
+    const candidates = gesture.sourceIndex.objectsInViewport(
+      eraserGestureBounds(gesture.path, eraserSize, 64)
+    );
+    const result = eraseObjects(candidates, gesture.path, eraserSize, eraserMode);
+    gesture.result = result;
+    props.onReplace(() =>
+      result.before.length
+        ? applyOperation(gesture.baseDocument, {
+            kind: "update-objects",
+            before: result.before,
+            after: result.after,
+            label: "Aperçu gomme"
+          })
+        : gesture.baseDocument
+    );
+  };
+
+  const finishEraserGesture = () => {
+    const gesture = eraserGestureRef.current;
+    eraserGestureRef.current = undefined;
+    const result = gesture?.result;
+    if (!result?.before.length) return;
+    props.onUpdate(
+      result.before,
+      result.after,
+      eraserMode === "object" ? "Effacer des objets" : "Gommer le trait"
+    );
+  };
+
   const addAt = useCallback(
     (nextTool: Tool, point: Point) => {
       const base = {
@@ -382,13 +439,16 @@ export function EditorWorkspace(props: Props) {
           camera: cameraRef.current
         };
         draftRef.current = undefined;
+        if (eraserGestureRef.current?.result.before.length) finishEraserGesture();
+        else eraserGestureRef.current = undefined;
+        interactionPageRef.current = undefined;
         dragRef.current = undefined;
         setCanvasActive(false);
         event.preventDefault();
         return;
       }
     }
-    if (stylusOnly && event.pointerType === "touch" && isInkTool) {
+    if (stylusOnly && event.pointerType === "touch" && (isInkTool || tool === "eraser")) {
       event.preventDefault();
       return;
     }
@@ -398,8 +458,6 @@ export function EditorWorkspace(props: Props) {
       Date.now() - penRecentAt.current < 800
     )
       return;
-    // The workspace owns drawing gestures. Without this, a mouse drag started over a
-    // DOM object can become a native text selection or HTML drag operation.
     if (isDirectManipulationTool || event.button === 1) event.preventDefault();
     const hitPage = pageAt(worldAt(event));
     if (document.notebook.mode === "book" && !hitPage && tool !== "hand" && event.button !== 1)
@@ -443,8 +501,24 @@ export function EditorWorkspace(props: Props) {
       return;
     }
     if (tool === "eraser") {
-      const hit = engine.current.objectAt(point);
-      if (hit) props.onDelete([hit]);
+      const erasePageId = interactionPageRef.current?.id;
+      const source = props.documentRef.current.objects.filter((object) =>
+        document.notebook.mode === "whiteboard" ? !object.pageId : object.pageId === erasePageId
+      );
+      const sourceIndex = new CanvasEngine();
+      sourceIndex.setObjects(source);
+      engine.current.select([]);
+      syncSelection();
+      eraserGestureRef.current = {
+        baseDocument: props.documentRef.current,
+        path: [point],
+        sourceIndex,
+        result: { before: [], after: [] }
+      };
+      eraserLastApplyAt.current = event.timeStamp;
+      dragRef.current = { kind: "erase", start: point };
+      setCanvasActive(true);
+      previewEraserGesture();
       return;
     }
     if (tool === "hand" || event.button === 1) {
@@ -479,6 +553,7 @@ export function EditorWorkspace(props: Props) {
       dragRef.current = { kind: "select", start: point };
     }
   };
+
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.pointerType === "touch")
       touchPointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -506,13 +581,22 @@ export function EditorWorkspace(props: Props) {
     }
     const state = dragRef.current;
     if (!state) return;
-    if (state.kind === "draw" || state.kind === "lasso" || state.kind === "pan")
+    if (
+      state.kind === "draw" ||
+      state.kind === "erase" ||
+      state.kind === "lasso" ||
+      state.kind === "pan"
+    )
       event.preventDefault();
     const drawInset = state.kind === "draw" ? (draftRef.current?.size ?? inkSize) / 2 + 2 : 0;
     const point = interactionPointAt(event, drawInset);
     if (state.kind === "draw" && draftRef.current) {
-      appendCoalescedInkPoints(draftRef.current.points, event, (sample) =>
-        interactionPointAt(sample, drawInset)
+      const captureSpacing = captureSpacingForZoom(cameraRef.current.zoom, draftRef.current.size);
+      appendCoalescedInkPoints(
+        draftRef.current.points,
+        event,
+        (sample) => interactionPointAt(sample, drawInset),
+        captureSpacing
       );
       const gesture = straightenGestureRef.current;
       const end = draftRef.current.points.at(-1);
@@ -523,11 +607,19 @@ export function EditorWorkspace(props: Props) {
         end &&
         distance(end, gesture.lastMotionPoint) >= stillness
       ) {
-        // Writing again before releasing cancels the provisional snap and keeps
-        // the full freehand path, so the gesture never traps the user in a line.
         draftRef.current.straightLine = undefined;
         scheduleStraightening(event.pointerId, end);
       }
+      return;
+    }
+    if (state.kind === "erase") {
+      if (event.timeStamp - eraserLastApplyAt.current < 14) return;
+      const gesture = eraserGestureRef.current;
+      if (gesture) {
+        appendEraserPoint(gesture.path, point, eraserSize);
+        previewEraserGesture();
+      }
+      eraserLastApplyAt.current = event.timeStamp;
       return;
     }
     if (state.kind === "draw-icon") {
@@ -559,12 +651,11 @@ export function EditorWorkspace(props: Props) {
       setSelectionRect(normalizeRect(state.start, point));
       return;
     }
-    if (state.kind === "lasso") {
-      setLasso((current) => [...current, point]);
-    }
+    if (state.kind === "lasso") setLasso((current) => [...current, point]);
     if (state.kind === "resize") resizePointRef.current = point;
     if (state.kind === "arrow-point") resizePointRef.current = point;
   };
+
   const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
     setCanvasActive(false);
     if (event.pointerType === "touch") {
@@ -583,15 +674,21 @@ export function EditorWorkspace(props: Props) {
     if (state.kind === "draw" && draftRef.current) {
       const draft = draftRef.current;
       draftRef.current = undefined;
-      // Pointer-up often carries the last, otherwise missing, sample of a fast stroke.
       if (!snappedToLine) {
         const drawInset = draft.size / 2 + 2;
-        appendCoalescedInkPoints(draft.points, event, (sample) =>
-          interactionPointAt(sample, drawInset)
+        const captureSpacing = captureSpacingForZoom(cameraRef.current.zoom, draft.size);
+        appendCoalescedInkPoints(
+          draft.points,
+          event,
+          (sample) => interactionPointAt(sample, drawInset),
+          captureSpacing
         );
       }
       if (draft.points.length > 0) {
-        const points = snappedToLine ? [...snappedToLine.points] : compactInkPoints(draft.points);
+        const compactTolerance = Math.max(0.22, Math.min(0.72, draft.size * 0.075));
+        const points = snappedToLine
+          ? [...snappedToLine.points]
+          : compactInkPoints(draft.points, compactTolerance);
         const bounds = objectBoundsFromPoints(points);
         const ink = newInk({
           notebookId: document.notebook.id,
@@ -623,6 +720,16 @@ export function EditorWorkspace(props: Props) {
           }
         }
       }
+    }
+    if (state.kind === "erase") {
+      const gesture = eraserGestureRef.current;
+      if (gesture) {
+        appendEraserPoint(gesture.path, interactionPointAt(event), eraserSize);
+        previewEraserGesture();
+      }
+      finishEraserGesture();
+      interactionPageRef.current = undefined;
+      return;
     }
     if (state.kind === "draw-icon") {
       const shape = iconShapeBetween(
@@ -852,6 +959,7 @@ export function EditorWorkspace(props: Props) {
     },
     [document, activePage, props]
   );
+
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       const point = defaultPosition(documentRefCount(props.documentRef));
@@ -997,6 +1105,7 @@ export function EditorWorkspace(props: Props) {
       setOcrBusy(false);
     }
   };
+
   return (
     <section className="editor-shell">
       <EditorHeader
@@ -1272,6 +1381,8 @@ export function EditorWorkspace(props: Props) {
             size={inkSize}
             smoothing={inkSmoothing}
             dynamics={inkDynamics}
+            eraserMode={eraserMode}
+            eraserSize={eraserSize}
             paletteVisible={showPalette}
             sidebarPosition={sidebarPosition}
             stylusOnly={stylusOnly}
@@ -1284,6 +1395,8 @@ export function EditorWorkspace(props: Props) {
             onSize={setInkSize}
             onSmoothing={setInkSmoothing}
             onDynamics={setInkDynamics}
+            onEraserMode={setEraserMode}
+            onEraserSize={setEraserSize}
             onPaletteVisible={setShowPalette}
             onSidebarPosition={setSidebarPosition}
             onStylusOnly={setStylusOnly}

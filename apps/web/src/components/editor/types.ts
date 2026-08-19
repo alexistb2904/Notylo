@@ -39,7 +39,15 @@ export interface StraightenGesture {
 
 export interface DragState {
   readonly kind:
-    "draw" | "draw-icon" | "move" | "select" | "lasso" | "pan" | "resize" | "arrow-point";
+    | "draw"
+    | "draw-icon"
+    | "erase"
+    | "move"
+    | "select"
+    | "lasso"
+    | "pan"
+    | "resize"
+    | "arrow-point";
   readonly start: Point;
   readonly originals?: readonly DocumentObject[];
   readonly handle?: ResizeHandle;
