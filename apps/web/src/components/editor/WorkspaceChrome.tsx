@@ -85,11 +85,16 @@ export function EditorHeader({
           </button>
         )}
         {onShare && (
-          <button className="share-button" onClick={onShare}>
+          <button
+            className="share-button share-trigger"
+            onClick={onShare}
+            aria-haspopup="dialog"
+            title="Partager ce notebook"
+          >
             <Share2 size={15} /> Partager
           </button>
         )}
-        <button className="share-button" onClick={onExport}>
+        <button className="share-button export-trigger" onClick={onExport}>
           Exporter
         </button>
       </div>
