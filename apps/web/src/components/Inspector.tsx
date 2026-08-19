@@ -216,7 +216,7 @@ export function Inspector({
       {isInkTool && (
         <section className="settings-section pressure-settings" aria-labelledby="pressure-settings">
           <div className="section-title-row">
-            <h3 id="pressure-settings">Pression du stylet</h3>
+            <h3 id="pressure-settings">Dynamique du stylet</h3>
             <span className="tablet-status">STYLET</span>
           </div>
           <label className="property-label range-property">
@@ -273,20 +273,22 @@ export function Inspector({
                 }
               />
             </label>
-            <label className="toggle-row compact-toggle">
-              <span>
-                <strong>Angle</strong>
-                <small>L’inclinaison oriente la pointe et les soies.</small>
-              </span>
-              <input
-                aria-label="L’inclinaison du stylet change l’angle"
-                type="checkbox"
-                checked={dynamics.tiltAffectsAngle}
-                onChange={(event) =>
-                  onDynamics({ ...dynamics, tiltAffectsAngle: event.target.checked })
-                }
-              />
-            </label>
+            {tool === "pencil" && (
+              <label className="toggle-row compact-toggle">
+                <span>
+                  <strong>Inclinaison</strong>
+                  <small>L’angle du stylet oriente le grain du graphite sans déplacer le trait.</small>
+                </span>
+                <input
+                  aria-label="L’inclinaison du stylet oriente le graphite"
+                  type="checkbox"
+                  checked={dynamics.tiltAffectsAngle}
+                  onChange={(event) =>
+                    onDynamics({ ...dynamics, tiltAffectsAngle: event.target.checked })
+                  }
+                />
+              </label>
+            )}
           </div>
         </section>
       )}
