@@ -427,6 +427,13 @@ export function EditorWorkspace(props: Props) {
       tool === "lasso" ||
       tool === "hand";
     if (event.button !== 0 && event.button !== 1 && event.pointerType !== "pen") return;
+    if (event.button === 1 && event.pointerType === "mouse") {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      interactionPageRef.current = undefined;
+      dragRef.current = { kind: "pan", start: { x: event.clientX, y: event.clientY } };
+      return;
+    }
     if (event.pointerType === "pen") penRecentAt.current = Date.now();
     if (event.pointerType === "touch") {
       touchPointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });

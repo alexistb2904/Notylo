@@ -83,6 +83,35 @@ test("creates a notebook from the mobile empty state", async ({ page }) => {
   await createNotebook(page, "Maths mobile");
 });
 
+test("pans with the middle mouse button without drawing", async ({ page }) => {
+  await createNotebook(page, "Middle pan E2E");
+  await expect(page.getByTitle("Stylo")).toHaveAttribute("aria-pressed", "true");
+
+  const paper = page.getByLabel("Page du cahier").first();
+  const before = await paper.boundingBox();
+  expect(before).not.toBeNull();
+  if (!before) return;
+
+  const viewport = page.viewportSize() ?? { width: 1280, height: 720 };
+  const start = {
+    x: Math.max(80, Math.min(viewport.width - 220, before.x + 180)),
+    y: Math.max(120, Math.min(viewport.height - 160, before.y + 180))
+  };
+
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down({ button: "middle" });
+  await page.mouse.move(start.x + 72, start.y + 46, { steps: 6 });
+  await page.mouse.up({ button: "middle" });
+
+  const after = await paper.boundingBox();
+  expect(after).not.toBeNull();
+  if (!after) return;
+  expect(after.x - before.x).toBeGreaterThan(60);
+  expect(after.y - before.y).toBeGreaterThan(34);
+  await expect.poll(() => storedInkCount(page)).toBe(0);
+  await expect(page.getByTitle("Stylo")).toHaveAttribute("aria-pressed", "true");
+});
+
 test("renders live ink as vectors and keeps editor tools available", async ({ page }) => {
   await createNotebook(page, "Ink E2E");
 
