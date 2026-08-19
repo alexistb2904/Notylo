@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import { newInk } from "../lib/factories";
+import { formatNumber, t } from "../i18n";
 
 export function BenchmarkPage() {
   const [amount, setAmount] = useState(0);
@@ -30,23 +31,21 @@ export function BenchmarkPage() {
   return (
     <main className="debug-page">
       <Link to="/">← Notylo</Link>
-      <p className="eyebrow">Performance locale</p>
-      <h1>Benchmark du moteur</h1>
-      <p>
-        Génère des strokes synthétiques en mémoire pour détecter une régression de l’architecture.
-      </p>
+      <p className="eyebrow">{t("debug.localPerformance")}</p>
+      <h1>{t("debug.engineBenchmark")}</h1>
+      <p>{t("debug.benchmarkIntro")}</p>
       <div className="benchmark-actions">
         {[100, 1_000, 10_000, 50_000].map((count) => (
           <button key={count} onClick={() => generate(count)}>
-            {count.toLocaleString("fr-FR")} strokes
+            {formatNumber(count)} {t("debug.strokes")}
           </button>
         ))}
       </div>
       {amount > 0 && (
         <div className="benchmark-result">
-          <strong>{amount.toLocaleString("fr-FR")}</strong>
-          <span>objets générés en {duration?.toFixed(1)} ms</span>
-          <small>La visualisation lourde n’est volontairement pas montée dans React.</small>
+          <strong>{formatNumber(amount)}</strong>
+          <span>{t("debug.generated", { duration: duration?.toFixed(1) ?? "0.0" })}</span>
+          <small>{t("debug.noHeavyRender")}</small>
         </div>
       )}
     </main>
