@@ -33,17 +33,21 @@ export function PublicPage() {
 
   if (error)
     return (
-      <main className="fatal-state">
-        <Link to="/">← Accueil Notylo</Link>
+      <main className="fatal-state public-link-state">
+        <span className="brand-mark">N</span>
+        <p className="eyebrow">Lien public</p>
         <h1>Notebook indisponible</h1>
         <p>{error}</p>
+        <Link to="/">Retour à Notylo</Link>
       </main>
     );
   if (!loaded)
     return (
-      <main className="loading-state">
-        <span className="brand-mark">P</span>
-        <p>Ouverture du notebook partagé…</p>
+      <main className="loading-state public-link-state" aria-live="polite">
+        <span className="brand-mark">N</span>
+        <p className="eyebrow">Notylo · lien public</p>
+        <strong>Ouverture du notebook…</strong>
+        <p>Chargement du document et de ses ressources.</p>
       </main>
     );
   return (
@@ -118,7 +122,7 @@ function LoadedPublicNotebook({
         }
       }
     },
-    [token]
+    [repository, token]
   );
 
   useEffect(() => {
@@ -129,7 +133,7 @@ function LoadedPublicNotebook({
     }
     const timer = window.setTimeout(() => void savePublic(session.document), 500);
     return () => window.clearTimeout(timer);
-  }, [mode, savePublic, session.document, token]);
+  }, [mode, savePublic, session.document]);
 
   const add = (object: DocumentObject) =>
     session.commit({ kind: "add-object", object, label: "Ajouter un objet" });
@@ -157,29 +161,20 @@ function LoadedPublicNotebook({
   };
 
   return (
-    <>
-      <div className="public-access-banner">
-        <span>
-          {mode === "write"
-            ? "Notebook public · lecture et écriture"
-            : "Notebook public · lecture seule"}
-        </span>
-        <Link to="/">Ouvrir Notylo</Link>
-      </div>
-      <EditorWorkspace
-        document={session.document}
-        documentRef={session.documentRef}
-        saveState={mode === "read" ? "saved" : saveState}
-        readOnly={mode === "read"}
-        onAdd={add}
-        onUpdate={update}
-        onDelete={remove}
-        onAddPage={addPage}
-        onUndo={session.undo}
-        onRedo={session.redo}
-        onReplace={session.replace}
-      />
-    </>
+    <EditorWorkspace
+      document={session.document}
+      documentRef={session.documentRef}
+      saveState={mode === "read" ? "saved" : saveState}
+      readOnly={mode === "read"}
+      publicMode={mode}
+      onAdd={add}
+      onUpdate={update}
+      onDelete={remove}
+      onAddPage={addPage}
+      onUndo={session.undo}
+      onRedo={session.redo}
+      onReplace={session.replace}
+    />
   );
 }
 

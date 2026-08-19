@@ -1,0 +1,304 @@
+/* Public links and touch-first editor refinements. Loaded after mobile-editor.css. */
+
+.editor-shell.public-editor {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100vh;
+  min-height: 100dvh;
+  max-height: 100dvh;
+  background: var(--surface);
+}
+
+.public-editor-header {
+  position: relative;
+  z-index: 12;
+  min-height: 62px;
+  height: 62px;
+  gap: 10px;
+  padding-inline: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
+  box-shadow: 0 6px 22px color-mix(in srgb, var(--surface-dark) 7%, transparent);
+  backdrop-filter: blur(18px);
+}
+
+.public-editor-header .back-button {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  color: var(--ink-strong);
+  background: var(--control);
+}
+
+.public-editor-header .back-button:hover {
+  background: var(--control-hover);
+}
+
+.public-editor-header .editor-title {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.public-editor-header .document-kind {
+  color: var(--ink-muted);
+  font-size: 8px;
+  letter-spacing: 0.16em;
+}
+
+.public-editor-header .editor-title h1 {
+  max-width: min(30vw, 430px);
+  overflow: hidden;
+  color: var(--ink-strong);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.public-mode-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--ink-muted);
+  background: var(--surface-tint);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.public-mode-badge--read {
+  color: var(--ink-strong);
+  background: var(--control);
+}
+
+.public-mode-badge--write {
+  color: #347b57;
+  border-color: color-mix(in srgb, #4d9b72 34%, var(--line));
+  background: color-mix(in srgb, #4d9b72 10%, var(--surface-raised));
+}
+
+.public-editor-header .public-save-status {
+  min-width: 0;
+  max-width: min(32vw, 360px);
+  overflow: hidden;
+  color: var(--ink-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.public-editor-header .public-save-status > span {
+  color: #4d9b72;
+}
+
+.public-editor .canvas-area {
+  background-color: var(--surface);
+}
+
+.public-read .canvas-area {
+  cursor: grab;
+}
+
+.public-read .canvas-area:active {
+  cursor: grabbing;
+}
+
+.public-read .editor-main {
+  padding-bottom: 0 !important;
+}
+
+.public-read .whiteboard-coordinate {
+  bottom: 14px;
+}
+
+.public-link-state {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 28px;
+  background:
+    radial-gradient(circle at 20% 15%, color-mix(in srgb, var(--focus) 10%, transparent), transparent 36%),
+    var(--surface);
+}
+
+.public-link-state .brand-mark {
+  margin-inline: auto;
+  color: var(--ink-inverse);
+  background: var(--surface-dark);
+  border: 0;
+  transform: none;
+}
+
+.public-link-state .eyebrow {
+  margin: 0;
+}
+
+.public-link-state > strong {
+  color: var(--ink-strong);
+  font:
+    600 24px/1.1 Newsreader,
+    serif;
+}
+
+.public-link-state > p:not(.eyebrow) {
+  max-width: 380px;
+  margin: 0 auto;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.public-link-state > a {
+  justify-self: center;
+  padding: 10px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  color: var(--ink-strong);
+  background: var(--control);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .public-editor-header {
+    min-height: 58px;
+    height: 58px;
+    gap: 6px;
+    padding-left: max(7px, env(safe-area-inset-left));
+    padding-right: max(7px, env(safe-area-inset-right));
+  }
+
+  .public-editor-header .back-button {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+  }
+
+  .public-editor-header .editor-title {
+    flex: 1 1 auto;
+  }
+
+  .public-editor-header .document-kind {
+    display: block !important;
+    font-size: 7px;
+  }
+
+  .public-editor-header .editor-title h1 {
+    max-width: none;
+    font-size: 12px;
+  }
+
+  .public-mode-badge {
+    min-height: 32px;
+    padding: 6px 8px;
+    gap: 5px;
+    font-size: 9px;
+  }
+
+  .public-mode-badge svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .public-editor-header .public-save-status {
+    display: none !important;
+  }
+
+  .public-editor-header .header-actions {
+    gap: 2px;
+  }
+
+  .public-editor-header .header-actions button:not(.share-button):not(.mobile-tools-toggle) {
+    width: 34px;
+    min-width: 34px;
+    height: 34px;
+    min-height: 34px;
+  }
+
+  .public-editor-header .export-trigger {
+    min-height: 34px;
+    margin-left: 0;
+    padding-inline: 9px !important;
+    font-size: 9px;
+  }
+
+  .public-read .editor-main {
+    padding-bottom: 0 !important;
+  }
+
+  .public-read .page-nav {
+    top: auto;
+    bottom: max(10px, env(safe-area-inset-bottom));
+    left: max(10px, env(safe-area-inset-left));
+  }
+
+  .public-read .zoom-controls {
+    top: 10px;
+    bottom: auto;
+  }
+
+  .public-read .whiteboard-coordinate {
+    bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  /* Mobile palette: respect the component's stored x/y instead of pinning it to the dock. */
+  .floating-palette {
+    left: var(--notylo-palette-x, 12px) !important;
+    top: var(--notylo-palette-y, 86px) !important;
+    right: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    width: max-content;
+    max-width: calc(100% - 16px);
+    overflow-x: auto;
+    overflow-y: hidden;
+    touch-action: pan-x;
+  }
+
+  .floating-palette .palette-grip {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    display: grid !important;
+    flex: 0 0 auto;
+    color: var(--ink-muted);
+    background: var(--surface-raised);
+    border-right: 1px solid var(--line-strong);
+    touch-action: none;
+  }
+}
+
+@media (max-width: 460px) {
+  .public-mode-badge span {
+    max-width: 82px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+@media (max-width: 390px) {
+  .public-editor-header {
+    gap: 4px;
+  }
+
+  .public-mode-badge {
+    width: 32px;
+    min-width: 32px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .public-mode-badge span {
+    display: none;
+  }
+
+  .public-editor-header .export-trigger {
+    padding-inline: 7px !important;
+  }
+}

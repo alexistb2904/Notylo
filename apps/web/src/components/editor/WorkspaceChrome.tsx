@@ -5,12 +5,16 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronUp,
+  Eye,
   PanelLeft,
+  PencilLine,
   Plus,
   Redo2,
   Share2,
   Undo2
 } from "lucide-react";
+
+export type PublicAccessMode = "read" | "write";
 
 export function EditorHeader({
   document,
@@ -22,6 +26,7 @@ export function EditorHeader({
   toolsOpen,
   onToggleTools,
   readOnly = false,
+  publicMode,
   onShare
 }: {
   readonly document: NotebookDocument;
@@ -32,34 +37,70 @@ export function EditorHeader({
   onExport(): void;
   readonly toolsOpen: boolean;
   readonly readOnly?: boolean;
+  readonly publicMode?: PublicAccessMode;
   readonly onShare?: () => void;
   onToggleTools(): void;
 }) {
-  const label = readOnly
-    ? "Lecture seule"
-    : saveState === "saved"
-      ? "Enregistré sur cet appareil"
-      : saveState === "cloud-synced"
-        ? "Synchronisé dans le cloud"
-        : saveState === "saving"
-          ? "Sauvegarde…"
-          : saveState === "offline"
-            ? "Hors connexion"
-            : saveState === "conflict"
-              ? "Conflit de synchronisation"
-              : "Erreur de sauvegarde";
+  const label =
+    publicMode === "read"
+      ? "1 doigt pour déplacer · pincer pour zoomer"
+      : publicMode === "write"
+        ? saveState === "cloud-synced"
+          ? "Modifications synchronisées"
+          : saveState === "saving"
+            ? "Synchronisation…"
+            : saveState === "offline"
+              ? "Hors connexion"
+              : saveState === "conflict"
+                ? "Conflit de synchronisation"
+                : saveState === "error"
+                  ? "Erreur de synchronisation"
+                  : "Lien public modifiable"
+        : readOnly
+          ? "Lecture seule"
+          : saveState === "saved"
+            ? "Enregistré sur cet appareil"
+            : saveState === "cloud-synced"
+              ? "Synchronisé dans le cloud"
+              : saveState === "saving"
+                ? "Sauvegarde…"
+                : saveState === "offline"
+                  ? "Hors connexion"
+                  : saveState === "conflict"
+                    ? "Conflit de synchronisation"
+                    : "Erreur de sauvegarde";
+  const PublicModeIcon = publicMode === "read" ? Eye : PencilLine;
+  const publicModeLabel = publicMode === "read" ? "Lecture seule" : "Lecture et écriture";
+
   return (
-    <header className="editor-header">
-      <button className="back-button" onClick={onBack} aria-label="Retour aux cahiers">
+    <header
+      className={`editor-header${publicMode ? ` public-editor-header public-editor-header--${publicMode}` : ""}`}
+    >
+      <button
+        className="back-button"
+        onClick={onBack}
+        aria-label={publicMode ? "Retour à Notylo" : "Retour aux cahiers"}
+        title={publicMode ? "Retour à Notylo" : undefined}
+      >
         <ArrowLeft size={18} />
       </button>
       <div className="editor-title">
         <span className="document-kind">
-          {document.notebook.mode === "book" ? "CAHIER" : "WHITEBOARD"}
+          {publicMode ? "LIEN PUBLIC" : document.notebook.mode === "book" ? "CAHIER" : "WHITEBOARD"}
         </span>
         <h1>{document.notebook.title}</h1>
       </div>
-      <div className={`save-status ${saveState}`}>
+      {publicMode && (
+        <div
+          className={`public-mode-badge public-mode-badge--${publicMode}`}
+          aria-label={publicModeLabel}
+          title={publicModeLabel}
+        >
+          <PublicModeIcon size={14} aria-hidden="true" />
+          <span aria-hidden="true">{publicModeLabel}</span>
+        </div>
+      )}
+      <div className={`save-status ${saveState} ${publicMode ? "public-save-status" : ""}`}>
         <span>●</span>
         {label}
       </div>
@@ -108,7 +149,7 @@ export function ArrowPointHandles({
   onStart
 }: {
   readonly arrow: ShapeObject;
-  readonly offsetY?: number;
+  readonly offsetY?: number | undefined;
   onStart(index: number, event: ReactPointerEvent<HTMLButtonElement>): void;
 }) {
   return (
@@ -171,7 +212,7 @@ export function Paper({
       readonly lineColor?: string;
     };
   };
-  readonly offsetY?: number;
+  readonly offsetY?: number | undefined;
 }) {
   return (
     <div
@@ -194,12 +235,14 @@ export function PageNavigator({
   pages,
   current,
   onChange,
-  onNew
+  onNew,
+  canAdd = true
 }: {
   readonly pages: readonly { readonly id: string; readonly index: number }[];
   readonly current?: string | undefined;
   onChange(id: string): void;
   onNew(): void;
+  readonly canAdd?: boolean;
 }) {
   const active = pages.findIndex((page) => page.id === current);
   return (
@@ -219,9 +262,11 @@ export function PageNavigator({
       >
         <ChevronDown size={16} />
       </button>
-      <button title="Ajouter une page" onClick={onNew}>
-        <Plus size={15} />
-      </button>
+      {canAdd && (
+        <button title="Ajouter une page" onClick={onNew}>
+          <Plus size={15} />
+        </button>
+      )}
     </div>
   );
 }
