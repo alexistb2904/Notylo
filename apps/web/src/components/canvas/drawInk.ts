@@ -4,6 +4,14 @@ import type { InkDynamics, InkObject, InkPoint } from "@notylo/document-model";
 type RenderPoint = Pick<InkPoint, "x" | "y" | "pressure" | "tiltX" | "tiltY">;
 type BrushKind = "ink" | "nib" | "graphite" | "graphite-soft" | "marker" | "paint" | "highlighter";
 
+interface StrokeSample extends RenderPoint {
+  readonly halfWidth: number;
+  readonly opacity: number;
+  readonly angle: number;
+  readonly nx: number;
+  readonly ny: number;
+}
+
 const DEFAULT_DYNAMICS: InkDynamics = {
   pressureSensitivity: 0.5,
   pressureAffectsWidth: true,
@@ -11,6 +19,15 @@ const DEFAULT_DYNAMICS: InkDynamics = {
   tiltAffectsAngle: false
 };
 
+const LIVE_SAMPLE_LIMIT = 720;
+const COMPLETE_SAMPLE_LIMIT = 1800;
+const completeSampleCache = new WeakMap<object, { readonly key: string; readonly samples: RenderPoint[] }>();
+
+/**
+ * Renders handwriting as a continuous variable-width ribbon instead of a
+ * sequence of brush-tip stamps. This keeps edges continuous at high zoom and
+ * dramatically reduces Canvas draw calls on long notes.
+ */
 export function drawInk(
   context: CanvasRenderingContext2D,
   object: Pick<InkObject, "color" | "size" | "tool" | "smoothing" | "brushId" | "dynamics"> & {
@@ -24,31 +41,41 @@ export function drawInk(
   if (!object.points.length) return;
   const kind = brushKind(object.brushId, object.tool);
   const dynamics = object.dynamics ?? DEFAULT_DYNAMICS;
+  const preparedStroke = prepareStrokeSamples(
+    object.points,
+    object.smoothing ?? 0.55,
+    object.size,
+    isComplete
+  );
   const sources = visibleBounds
-    ? visibleInkRuns(object.points, visibleBounds, object.size * 2)
-    : [object.points];
+    ? visibleInkRuns(preparedStroke, visibleBounds, object.size * 2.5)
+    : [preparedStroke];
+
   context.save();
   context.fillStyle = object.color;
   context.strokeStyle = object.color;
+  context.lineJoin = "round";
+  context.lineCap = "round";
+
   for (const source of sources) {
-    const stabilized = stabilizeInkPath(source, object.smoothing ?? 0.55, isComplete);
-    // Note-taking favors consistent latency over sub-pixel texture. Long live
-    // strokes progressively reduce preview detail, then finish at normal quality.
-    const liveDetailScale = isComplete ? 1 : Math.min(3, Math.max(1, source.length / 700));
-    const spacing = brushRenderSpacing(kind, object.size) * liveDetailScale;
-    const points = resampleInkPath(stabilized, spacing).map((point) => ({
-      ...point,
-      x: point.x + offset.x,
-      y: point.y + offset.y
-    }));
-    for (let index = 0; index < points.length; index++) {
-      const point = points[index]!;
-      const previous = points[Math.max(0, index - 1)]!;
-      const next = points[Math.min(points.length - 1, index + 1)]!;
-      const direction = Math.atan2(next.y - previous.y, next.x - previous.x);
-      const dab = getDabDynamics(point, dynamics, direction);
-      const width = Math.max(0.24, object.size * dab.width);
-      drawDab(context, kind, point, width, dab.angle, dab.opacity * alpha, index);
+    if (!source.length) continue;
+    const samples = buildStrokeSamples(source, object.size, dynamics, kind, offset);
+    if (!samples.length) continue;
+
+    if (kind === "graphite" || kind === "graphite-soft") {
+      drawRibbon(context, samples, alpha * (kind === "graphite-soft" ? 0.52 : 0.4), dynamics);
+      drawGraphiteTexture(context, samples, object.size, alpha, kind === "graphite-soft");
+    } else if (kind === "paint") {
+      drawRibbon(context, samples, alpha * 0.5, dynamics);
+      drawPaintBristles(context, samples, object.size, alpha);
+    } else if (kind === "highlighter") {
+      drawRibbon(context, samples, alpha * 0.24, dynamics, true);
+    } else if (kind === "marker") {
+      drawRibbon(context, samples, alpha * 0.68, dynamics, true);
+    } else if (kind === "nib") {
+      drawRibbon(context, samples, alpha * 0.92, dynamics);
+    } else {
+      drawRibbon(context, samples, alpha * 0.96, dynamics);
     }
   }
   context.restore();
@@ -73,14 +100,6 @@ function brushKind(brushId: string | undefined, tool: InkObject["tool"]): BrushK
     default:
       return tool === "pencil" ? "graphite" : tool === "highlighter" ? "highlighter" : "ink";
   }
-}
-
-function brushRenderSpacing(kind: BrushKind, size: number): number {
-  if (kind === "paint") return Math.max(3, size * 0.55);
-  if (kind === "marker" || kind === "highlighter") return Math.max(2.2, size * 0.45);
-  if (kind === "graphite" || kind === "graphite-soft") return Math.max(1.7, size * 0.5);
-  if (kind === "nib") return Math.max(1.3, size * 0.4);
-  return Math.max(1.05, size * 0.36);
 }
 
 export function visibleInkRuns(
@@ -149,101 +168,273 @@ export function getDabDynamics(
   };
 }
 
-function drawDab(
-  context: CanvasRenderingContext2D,
-  kind: BrushKind,
-  point: RenderPoint,
-  size: number,
-  angle: number,
-  opacity: number,
-  index: number
-): void {
-  if (kind === "graphite" || kind === "graphite-soft") {
-    drawGraphiteDab(context, point, size, angle, opacity, index, kind === "graphite-soft");
-  } else if (kind === "paint") {
-    drawPaintDab(context, point, size, angle, opacity, index);
-  } else if (kind === "marker" || kind === "highlighter") {
-    context.globalAlpha = opacity * (kind === "highlighter" ? 0.075 : 0.28);
-    const ratio = kind === "highlighter" ? 0.34 : 0.48;
-    context.beginPath();
-    context.ellipse(point.x, point.y, size / 2, (size * ratio) / 2, angle, 0, Math.PI * 2);
-    context.fill();
-  } else {
-    context.globalAlpha = opacity * (kind === "nib" ? 0.82 : 0.92);
-    context.beginPath();
-    context.ellipse(
-      point.x,
-      point.y,
-      size / 2,
-      size * (kind === "nib" ? 0.16 : 0.48),
-      kind === "nib" ? angle + Math.PI / 4 : angle,
-      0,
-      Math.PI * 2
+/**
+ * O(n) stabilizer that rounds corners without the old fixed-size moving window.
+ * The algorithm stays inside the input's convex hull and always preserves the
+ * final pointer position, so live ink does not lag behind the stylus.
+ */
+export function stabilizeInkPath(
+  points: readonly RenderPoint[],
+  smoothing: number,
+  _complete = false
+): RenderPoint[] {
+  if (points.length < 3 || smoothing <= 0) return points.map((point) => ({ ...point }));
+  const amount = Math.min(1, Math.max(0, smoothing));
+  const strength = 0.18 + amount * 0.54;
+  const result: RenderPoint[] = [{ ...points[0]! }];
+
+  for (let index = 1; index < points.length - 1; index++) {
+    const previous = points[index - 1]!;
+    const current = points[index]!;
+    const next = points[index + 1]!;
+    const localTarget = interpolatePoint(
+      midpointPoint(previous, current),
+      midpointPoint(current, next),
+      0.5
     );
+    result.push(interpolatePoint(current, localTarget, strength));
+  }
+  result.push({ ...points.at(-1)! });
+  return result;
+}
+
+/**
+ * Adaptive renderer sampling. Long live strokes are capped so a multi-minute
+ * lecture note cannot make every animation frame progressively more expensive.
+ */
+export function prepareStrokeSamples(
+  points: readonly RenderPoint[],
+  smoothing: number,
+  size: number,
+  complete: boolean
+): RenderPoint[] {
+  if (points.length <= 1) return points.map((point) => ({ ...point }));
+  const cacheKey = `${smoothing.toFixed(4)}:${size.toFixed(3)}`;
+  if (complete) {
+    const cached = completeSampleCache.get(points as object);
+    if (cached?.key === cacheKey) return cached.samples;
+  }
+  // Bound the *input* work as well as the output geometry. Pointer coalescing can
+  // produce tens of thousands of raw samples during a very long held stroke;
+  // reprocessing all of them every frame would make latency grow with stroke age.
+  const boundedInput = capRenderInput(points, complete ? 6000 : 1600);
+  const stabilized = stabilizeInkPath(boundedInput, smoothing, complete);
+  const length = pathLength(stabilized);
+  const baseSpacing = Math.max(0.55, Math.min(2.2, size * 0.2));
+  const sampleLimit = complete ? COMPLETE_SAMPLE_LIMIT : LIVE_SAMPLE_LIMIT;
+  const adaptiveSpacing = Math.max(baseSpacing, length / sampleLimit);
+  const samples = resampleInkPath(stabilized, adaptiveSpacing);
+  if (complete) completeSampleCache.set(points as object, { key: cacheKey, samples });
+  return samples;
+}
+
+function capRenderInput(points: readonly RenderPoint[], maximum: number): RenderPoint[] {
+  if (points.length <= maximum) return points.map((point) => ({ ...point }));
+  const result: RenderPoint[] = [{ ...points[0]! }];
+  const stride = (points.length - 1) / (maximum - 1);
+  for (let index = 1; index < maximum - 1; index++) {
+    const sourceIndex = Math.min(points.length - 2, Math.round(index * stride));
+    result.push({ ...points[sourceIndex]! });
+  }
+  result.push({ ...points.at(-1)! });
+  return result;
+}
+
+function buildStrokeSamples(
+  points: readonly RenderPoint[],
+  size: number,
+  dynamics: InkDynamics,
+  kind: BrushKind,
+  offset: Point
+): StrokeSample[] {
+  return points.map((point, index) => {
+    const previous = points[Math.max(0, index - 1)]!;
+    const next = points[Math.min(points.length - 1, index + 1)]!;
+    let tx = next.x - previous.x;
+    let ty = next.y - previous.y;
+    const length = Math.hypot(tx, ty) || 1;
+    tx /= length;
+    ty /= length;
+    const direction = Math.atan2(ty, tx);
+    const fallbackAngle = kind === "nib" ? Math.PI / 4 : direction + Math.PI / 2;
+    const dab = getDabDynamics(point, dynamics, fallbackAngle);
+    const projected = tipProjection(kind, dab.angle, direction);
+    return {
+      ...point,
+      x: point.x + offset.x,
+      y: point.y + offset.y,
+      halfWidth: Math.max(0.14, (size * dab.width * projected) / 2),
+      opacity: dab.opacity,
+      angle: dab.angle,
+      nx: -ty,
+      ny: tx
+    };
+  });
+}
+
+function tipProjection(kind: BrushKind, tipAngle: number, direction: number): number {
+  if (kind !== "nib" && kind !== "marker" && kind !== "highlighter") return 1;
+  const ratio = kind === "nib" ? 0.34 : kind === "highlighter" ? 0.5 : 0.64;
+  const delta = direction - tipAngle;
+  return Math.max(ratio, Math.sqrt(Math.sin(delta) ** 2 + ratio * ratio * Math.cos(delta) ** 2));
+}
+
+function drawRibbon(
+  context: CanvasRenderingContext2D,
+  samples: readonly StrokeSample[],
+  alpha: number,
+  dynamics: InkDynamics,
+  flatCaps = false
+): void {
+  if (samples.length === 1) {
+    const point = samples[0]!;
+    context.globalAlpha = alpha * point.opacity;
+    context.beginPath();
+    if (flatCaps) {
+      context.rect(
+        point.x - point.halfWidth,
+        point.y - point.halfWidth * 0.45,
+        point.halfWidth * 2,
+        point.halfWidth * 0.9
+      );
+    } else {
+      context.arc(point.x, point.y, point.halfWidth, 0, Math.PI * 2);
+    }
+    context.fill();
+    return;
+  }
+
+  if (dynamics.pressureAffectsOpacity) {
+    drawVariableOpacityRibbon(context, samples, alpha);
+    return;
+  }
+
+  context.globalAlpha = alpha;
+  const left = samples.map((point) => ({
+    x: point.x + point.nx * point.halfWidth,
+    y: point.y + point.ny * point.halfWidth
+  }));
+  const right = samples.map((point) => ({
+    x: point.x - point.nx * point.halfWidth,
+    y: point.y - point.ny * point.halfWidth
+  }));
+  fillSmoothPolygon(context, left, right);
+
+  if (!flatCaps) {
+    for (const point of [samples[0]!, samples.at(-1)!]) {
+      context.beginPath();
+      context.arc(point.x, point.y, point.halfWidth, 0, Math.PI * 2);
+      context.fill();
+    }
+  }
+}
+
+function drawVariableOpacityRibbon(
+  context: CanvasRenderingContext2D,
+  samples: readonly StrokeSample[],
+  alpha: number
+): void {
+  for (let index = 0; index < samples.length - 1; index++) {
+    const a = samples[index]!;
+    const b = samples[index + 1]!;
+    context.globalAlpha = alpha * (a.opacity + b.opacity) * 0.5;
+    context.beginPath();
+    context.moveTo(a.x + a.nx * a.halfWidth, a.y + a.ny * a.halfWidth);
+    context.lineTo(b.x + b.nx * b.halfWidth, b.y + b.ny * b.halfWidth);
+    context.lineTo(b.x - b.nx * b.halfWidth, b.y - b.ny * b.halfWidth);
+    context.lineTo(a.x - a.nx * a.halfWidth, a.y - a.ny * a.halfWidth);
+    context.closePath();
+    context.fill();
+  }
+  for (const point of [samples[0]!, samples.at(-1)!]) {
+    context.globalAlpha = alpha * point.opacity;
+    context.beginPath();
+    context.arc(point.x, point.y, point.halfWidth, 0, Math.PI * 2);
     context.fill();
   }
 }
 
-function drawGraphiteDab(
+function fillSmoothPolygon(
   context: CanvasRenderingContext2D,
-  point: RenderPoint,
+  left: readonly Point[],
+  right: readonly Point[]
+): void {
+  if (!left.length || !right.length) return;
+  context.beginPath();
+  context.moveTo(left[0]!.x, left[0]!.y);
+  traceSmoothEdge(context, left);
+  const reverse = [...right].reverse();
+  context.lineTo(reverse[0]!.x, reverse[0]!.y);
+  traceSmoothEdge(context, reverse);
+  context.closePath();
+  context.fill();
+}
+
+function traceSmoothEdge(context: CanvasRenderingContext2D, points: readonly Point[]): void {
+  if (points.length < 2) return;
+  for (let index = 1; index < points.length - 1; index++) {
+    const point = points[index]!;
+    const next = points[index + 1]!;
+    context.quadraticCurveTo(point.x, point.y, (point.x + next.x) / 2, (point.y + next.y) / 2);
+  }
+  const last = points.at(-1)!;
+  context.lineTo(last.x, last.y);
+}
+
+function drawGraphiteTexture(
+  context: CanvasRenderingContext2D,
+  samples: readonly StrokeSample[],
   size: number,
-  angle: number,
-  opacity: number,
-  index: number,
+  alpha: number,
   soft: boolean
 ): void {
-  const grains = soft ? 3 : 2;
-  const cosine = Math.cos(angle);
-  const sine = Math.sin(angle);
-  for (let grain = 0; grain < grains; grain++) {
-    const noise = pseudoRandom(index * 17 + grain * 43);
-    const second = pseudoRandom(index * 31 + grain * 71 + 9);
-    const radius = size * (0.05 + pseudoRandom(index + grain * 13) * (soft ? 0.13 : 0.1));
-    context.globalAlpha = opacity * (soft ? 0.16 : 0.12) * (0.55 + noise * 0.45);
+  if (samples.length < 2) return;
+  const stride = Math.max(3, Math.ceil(samples.length / (soft ? 150 : 110)));
+  context.lineCap = "round";
+  context.lineWidth = Math.max(0.22, size * (soft ? 0.055 : 0.045));
+  for (let index = 1; index < samples.length - 1; index += stride) {
+    const point = samples[index]!;
+    const noise = pseudoRandom(index * 37 + Math.round(point.x * 3) + Math.round(point.y * 5));
+    const across = (noise - 0.5) * point.halfWidth * 1.5;
+    const length = Math.max(0.7, size * (0.22 + pseudoRandom(index * 71) * 0.35));
+    const tangentX = point.ny;
+    const tangentY = -point.nx;
+    context.globalAlpha = alpha * point.opacity * (soft ? 0.22 : 0.16);
     context.beginPath();
-    const localX = (noise - 0.5) * size * 0.82;
-    const localY = (second - 0.5) * size * 0.6;
-    context.ellipse(
-      point.x + localX * cosine - localY * sine,
-      point.y + localX * sine + localY * cosine,
-      Math.max(0.16, radius * 1.8),
-      Math.max(0.12, radius),
-      angle + noise * Math.PI,
-      0,
-      Math.PI * 2
+    context.moveTo(
+      point.x + point.nx * across - tangentX * length * 0.5,
+      point.y + point.ny * across - tangentY * length * 0.5
     );
-    context.fill();
+    context.lineTo(
+      point.x + point.nx * across + tangentX * length * 0.5,
+      point.y + point.ny * across + tangentY * length * 0.5
+    );
+    context.stroke();
   }
 }
 
-function drawPaintDab(
+function drawPaintBristles(
   context: CanvasRenderingContext2D,
-  point: RenderPoint,
+  samples: readonly StrokeSample[],
   size: number,
-  angle: number,
-  opacity: number,
-  index: number
+  alpha: number
 ): void {
-  const bristles = 3;
-  const cosine = Math.cos(angle);
-  const sine = Math.sin(angle);
-  for (let bristle = 0; bristle < bristles; bristle++) {
-    const across = (bristle / (bristles - 1) - 0.5) * size;
-    const dryGap = pseudoRandom(index * 19 + bristle * 101);
-    if (dryGap < 0.12) continue;
-    context.globalAlpha = opacity * (0.12 + dryGap * 0.13);
+  if (samples.length < 2) return;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  for (const lane of [-0.58, 0, 0.58]) {
+    context.globalAlpha = alpha * (lane === 0 ? 0.24 : 0.16);
+    context.lineWidth = Math.max(0.32, size * (lane === 0 ? 0.075 : 0.055));
     context.beginPath();
-    context.ellipse(
-      point.x - across * sine,
-      point.y + across * cosine,
-      size * 0.28,
-      Math.max(0.22, size * 0.055),
-      angle,
-      0,
-      Math.PI * 2
-    );
-    context.fill();
+    samples.forEach((point, index) => {
+      const wobble = (pseudoRandom(index * 53 + Math.round((lane + 1) * 100)) - 0.5) * 0.12;
+      const offset = point.halfWidth * (lane + wobble);
+      const x = point.x + point.nx * offset;
+      const y = point.y + point.ny * offset;
+      if (!index) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    });
+    context.stroke();
   }
 }
 
@@ -252,76 +443,47 @@ function pseudoRandom(seed: number): number {
   return value - Math.floor(value);
 }
 
-/** Fixed-sample moving average modelled after Krita's freehand stabilizer. */
-export function stabilizeInkPath(
-  points: readonly RenderPoint[],
-  smoothing: number,
-  complete = false
-): RenderPoint[] {
-  if (points.length < 2 || smoothing <= 0) return points.map((point) => ({ ...point }));
-  const amount = Math.min(1, Math.max(0, smoothing));
-  const samples = resampleInkPath(points, 2);
-  const sampleSize = 3 + Math.round(amount * amount * 29);
-  const first = samples[0]!;
-  const queue = Array.from({ length: sampleSize }, () => ({ ...first }));
-  const result: RenderPoint[] = [{ ...first }];
-  const pushSample = (sample: RenderPoint) => {
-    let x = sample.x;
-    let y = sample.y;
-    let pressure = sample.pressure;
-    let tiltX = sample.tiltX ?? 0;
-    let tiltY = sample.tiltY ?? 0;
-    for (let index = 1; index < queue.length; index++) {
-      x += queue[index]!.x;
-      y += queue[index]!.y;
-      pressure += queue[index]!.pressure;
-      tiltX += queue[index]!.tiltX ?? 0;
-      tiltY += queue[index]!.tiltY ?? 0;
-    }
-    result.push({
-      x: x / sampleSize,
-      y: y / sampleSize,
-      pressure: pressure / sampleSize,
-      tiltX: tiltX / sampleSize,
-      tiltY: tiltY / sampleSize
-    });
-    queue.shift();
-    queue.push(sample);
-  };
-  for (let index = 1; index < samples.length; index++) pushSample(samples[index]!);
-  if (complete) {
-    const finalPoint = samples.at(-1)!;
-    for (let index = 0; index < sampleSize; index++) pushSample(finalPoint);
+function pathLength(points: readonly RenderPoint[]): number {
+  let total = 0;
+  for (let index = 1; index < points.length; index++) {
+    total += Math.hypot(points[index]!.x - points[index - 1]!.x, points[index]!.y - points[index - 1]!.y);
   }
-  return result;
+  return total;
 }
 
 function resampleInkPath(points: readonly RenderPoint[], spacing: number): RenderPoint[] {
   const result: RenderPoint[] = [{ ...points[0]! }];
-  let previous: RenderPoint = { ...points[0]! };
-  let remainder = 0;
+  let segmentStart: RenderPoint = { ...points[0]! };
+  let carried = 0;
+
   for (let index = 1; index < points.length; index++) {
     const target = points[index]!;
-    let dx = target.x - previous.x;
-    let dy = target.y - previous.y;
+    let dx = target.x - segmentStart.x;
+    let dy = target.y - segmentStart.y;
     let distance = Math.hypot(dx, dy);
-    while (distance + remainder >= spacing && distance > 0) {
-      const ratio = (spacing - remainder) / distance;
-      previous = interpolatePoint(previous, target, ratio);
-      result.push(previous);
-      remainder = 0;
-      dx = target.x - previous.x;
-      dy = target.y - previous.y;
+
+    while (distance + carried >= spacing && distance > 0) {
+      const ratio = (spacing - carried) / distance;
+      segmentStart = interpolatePoint(segmentStart, target, ratio);
+      result.push(segmentStart);
+      carried = 0;
+      dx = target.x - segmentStart.x;
+      dy = target.y - segmentStart.y;
       distance = Math.hypot(dx, dy);
     }
-    remainder += distance;
-    previous = { ...target };
+    carried += distance;
+    segmentStart = { ...target };
   }
+
   const finalPoint = points.at(-1)!;
   const last = result.at(-1)!;
   if (Math.hypot(finalPoint.x - last.x, finalPoint.y - last.y) > 0.001)
     result.push({ ...finalPoint });
   return result;
+}
+
+function midpointPoint(a: RenderPoint, b: RenderPoint): RenderPoint {
+  return interpolatePoint(a, b, 0.5);
 }
 
 function interpolatePoint(start: RenderPoint, end: RenderPoint, ratio: number): RenderPoint {
