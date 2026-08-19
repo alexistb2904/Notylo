@@ -120,19 +120,22 @@ test("renders live ink as vectors and keeps editor tools available", async ({ pa
   await expect(page.locator(".vector-object-layer path")).toHaveCount(1);
 
   await page.getByTitle("Brosses").click();
-  await page.getByRole("button", { name: /Crayon esquisse/i }).click();
+  const brushDialog = page.getByRole("dialog", { name: "Brosses et épaisseurs" });
+  const pencilPreset = brushDialog.getByRole("button", { name: /^Crayon\b/i });
+  await pencilPreset.click();
   await expect(page.getByTitle("Crayon")).toHaveAttribute("aria-pressed", "true");
 
   await drawStroke(page, 90);
   await expect.poll(() => storedInkCount(page)).toBe(2);
-  // Fineliner = one outline. Pencil = one outline + one vector graphite texture path.
+  // Pen = one outline. Pencil = one outline + one vector graphite texture path.
   await expect(page.locator(".vector-object-layer path")).toHaveCount(3);
 
   await page.getByTitle("Brosses").click();
-  await expect(page.getByRole("button", { name: /Crayon esquisse/i })).toHaveAttribute(
-    "aria-pressed",
-    "true"
-  );
+  await expect(
+    page.getByRole("dialog", { name: "Brosses et épaisseurs" }).getByRole("button", {
+      name: /^Crayon\b/i
+    })
+  ).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Fermer" }).click();
 
   for (const tool of ["Surligneur", "Gomme (E)", "Texte (T)", "Forme libre", "Équation", "Tableau"]) {
