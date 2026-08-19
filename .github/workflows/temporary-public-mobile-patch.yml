@@ -1,0 +1,293 @@
+name: Temporary public mobile interaction patch
+
+on:
+  push:
+    branches:
+      - fix/public-mobile-navigation-ui
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[public-mobile-patch]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/public-mobile-navigation-ui
+      - name: Patch EditorWorkspace touch navigation
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("apps/web/src/components/EditorWorkspace.tsx")
+          text = path.read_text()
+
+          def replace_once(old: str, new: str):
+              global text
+              if old not in text:
+                  raise SystemExit(f"Expected patch anchor not found:\n{old[:180]}")
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              '  readonly onShare?: () => void;\n  readonly readOnly?: boolean;\n}',
+              '  readonly onShare?: () => void;\n  readonly readOnly?: boolean;\n  readonly publicMode?: "read" | "write";\n}'
+          )
+          replace_once(
+              '  const penRecentAt = useRef(0);\n  const internalClipboard = useRef<readonly DocumentObject[]>([]);',
+              '  const penRecentAt = useRef(0);\n  const activePenPointers = useRef(new Set<number>());\n  const internalClipboard = useRef<readonly DocumentObject[]>([]);'
+          )
+
+          down_start = text.index('  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {')
+          move_start = text.index('\n  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {', down_start)
+          new_down = '''  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const isInkTool = tool === "pen" || tool === "pencil" || tool === "highlighter";
+    const isShapeDrawing = tool === "shape" && shapeRecognition;
+    const isIconDrawing = tool === "icon";
+    const isDirectManipulationTool =
+      isInkTool ||
+      isShapeDrawing ||
+      isIconDrawing ||
+      tool === "eraser" ||
+      tool === "lasso" ||
+      tool === "hand";
+    if (event.button !== 0 && event.button !== 1 && event.pointerType !== "pen") return;
+
+    if (event.pointerType === "pen") {
+      activePenPointers.current.add(event.pointerId);
+      penRecentAt.current = Date.now();
+    }
+
+    if (event.pointerType === "touch") {
+      const touchNavigates = readOnly || (stylusOnly && (isInkTool || tool === "eraser"));
+      if (touchNavigates && !readOnly && activePenPointers.current.size > 0) {
+        event.preventDefault();
+        return;
+      }
+
+      touchPointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (touchPointers.current.size === 2) {
+        const points = [...touchPointers.current.values()];
+        pinch.current = {
+          distance: distance(points[0]!, points[1]!),
+          zoom: cameraRef.current.zoom,
+          center: midpoint(points[0]!, points[1]!),
+          camera: cameraRef.current
+        };
+        draftRef.current = undefined;
+        if (eraserGestureRef.current?.result.before.length) finishEraserGesture();
+        else eraserGestureRef.current = undefined;
+        interactionPageRef.current = undefined;
+        dragRef.current = undefined;
+        setCanvasActive(false);
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        return;
+      }
+
+      if (touchNavigates) {
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        interactionPageRef.current = undefined;
+        dragRef.current = { kind: "pan", start: { x: event.clientX, y: event.clientY } };
+        return;
+      }
+    }
+
+    if (readOnly) {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      interactionPageRef.current = undefined;
+      dragRef.current = { kind: "pan", start: { x: event.clientX, y: event.clientY } };
+      return;
+    }
+
+    if (event.button === 1 && event.pointerType === "mouse") {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      interactionPageRef.current = undefined;
+      dragRef.current = { kind: "pan", start: { x: event.clientX, y: event.clientY } };
+      return;
+    }
+    if (
+      document.notebook.settings.palmRejection === "auto" &&
+      event.pointerType === "touch" &&
+      Date.now() - penRecentAt.current < 800
+    )
+      return;
+    if (isDirectManipulationTool || event.button === 1) event.preventDefault();
+    const hitPage = pageAt(worldAt(event));
+    if (document.notebook.mode === "book" && !hitPage && tool !== "hand" && event.button !== 1)
+      return;
+    if (hitPage?.page && hitPage.page.id !== activePage?.id) setCurrentPageId(hitPage.page.id);
+    interactionPageRef.current = hitPage?.page ?? activePage;
+    const drawInset =
+      isInkTool || isShapeDrawing ? (tool === "highlighter" ? inkSize * 2 : inkSize / 2) + 2 : 0;
+    const point = interactionPointAt(event, drawInset);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    if (isInkTool || isShapeDrawing) {
+      clearStraightenGesture();
+      draftRef.current = {
+        points: [toInkPoint(event, point)],
+        tool: isShapeDrawing ? "pen" : (tool as DraftInk["tool"]),
+        color: inkColor,
+        size: tool === "highlighter" ? inkSize * 4 : inkSize,
+        smoothing: inkSmoothing,
+        captureZoom: cameraRef.current.zoom,
+        brushId: isShapeDrawing ? "ink-fineliner" : brushId,
+        dynamics: inkDynamics,
+        ...(isShapeDrawing ? { recognizeShape: true } : {})
+      };
+      setCanvasActive(true);
+      dragRef.current = { kind: "draw", start: point };
+      if (isInkTool)
+        straightenGestureRef.current = { pointerId: event.pointerId, lastMotionPoint: point };
+      return;
+    }
+    if (isIconDrawing) {
+      shapeDraftRef.current = iconShapeBetween(
+        point,
+        point,
+        iconShape,
+        document.notebook.id,
+        interactionPageRef.current?.id,
+        document.objects.length + 1,
+        inkColor
+      );
+      setCanvasActive(true);
+      dragRef.current = { kind: "draw-icon", start: point };
+      return;
+    }
+    if (tool === "eraser") {
+      const erasePageId = interactionPageRef.current?.id;
+      const source = props.documentRef.current.objects.filter((object) =>
+        document.notebook.mode === "whiteboard" ? !object.pageId : object.pageId === erasePageId
+      );
+      const sourceIndex = new CanvasEngine();
+      sourceIndex.setObjects(source);
+      engine.current.select([]);
+      syncSelection();
+      eraserGestureRef.current = {
+        baseDocument: props.documentRef.current,
+        path: [point],
+        sourceIndex,
+        result: { before: [], after: [] }
+      };
+      eraserLastApplyAt.current = event.timeStamp;
+      dragRef.current = { kind: "erase", start: point };
+      setCanvasActive(true);
+      previewEraserGesture();
+      return;
+    }
+    if (tool === "hand" || event.button === 1) {
+      dragRef.current = { kind: "pan", start: { x: event.clientX, y: event.clientY } };
+      return;
+    }
+    if (tool === "lasso") {
+      setLasso([point]);
+      dragRef.current = { kind: "lasso", start: point };
+      return;
+    }
+    if (tool !== "select") {
+      addAt(tool, point);
+      return;
+    }
+    const hit = engine.current.objectAt(point);
+    if (hit) {
+      engine.current.select(
+        [hit.id],
+        event.shiftKey ? "add" : event.ctrlKey || event.metaKey ? "toggle" : "replace"
+      );
+      syncSelection();
+      resetDragOffset();
+      dragRef.current = {
+        kind: "move",
+        start: point,
+        originals: scopedObjects.filter((object) => engine.current.selection.includes(object.id))
+      };
+    } else {
+      engine.current.select([]);
+      syncSelection();
+      setSelectionRect({ x: point.x, y: point.y, width: 0, height: 0 });
+      dragRef.current = { kind: "select", start: point };
+    }
+  };
+'''
+          text = text[:down_start] + new_down + text[move_start:]
+
+          move_start = text.index('  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {')
+          up_start = text.index('\n  const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {', move_start)
+          old_move = text[move_start:up_start]
+          new_move = old_move.replace(
+              '  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {\n    if (readOnly) return;\n    if (event.pointerType === "touch")\n      touchPointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });',
+              '  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {\n    if (event.pointerType === "touch") {\n      if (!readOnly && stylusOnly && activePenPointers.current.size > 0) return;\n      touchPointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });\n    }'
+          )
+          pan_block = '''    const drawInset = state.kind === "draw" ? (draftRef.current?.size ?? inkSize) / 2 + 2 : 0;
+    const point = interactionPointAt(event, drawInset);'''
+          pan_replacement = '''    if (state.kind === "pan") {
+      setCamera((current) => ({
+        ...current,
+        x: current.x + event.clientX - state.start.x,
+        y: current.y + event.clientY - state.start.y
+      }));
+      dragRef.current = { ...state, start: { x: event.clientX, y: event.clientY } };
+      return;
+    }
+    if (readOnly) return;
+    const drawInset = state.kind === "draw" ? (draftRef.current?.size ?? inkSize) / 2 + 2 : 0;
+    const point = interactionPointAt(event, drawInset);'''
+          if pan_block not in new_move:
+              raise SystemExit("Could not locate move pan insertion anchor")
+          new_move = new_move.replace(pan_block, pan_replacement, 1)
+          duplicate_pan = '''    if (state.kind === "pan") {
+      setCamera((current) => ({
+        ...current,
+        x: current.x + event.clientX - state.start.x,
+        y: current.y + event.clientY - state.start.y
+      }));
+      dragRef.current = { ...state, start: { x: event.clientX, y: event.clientY } };
+      return;
+    }
+'''
+          duplicate_index = new_move.find(duplicate_pan, new_move.find(pan_replacement) + len(pan_replacement))
+          if duplicate_index < 0:
+              raise SystemExit("Could not locate duplicate pan block")
+          new_move = new_move[:duplicate_index] + new_move[duplicate_index + len(duplicate_pan):]
+          text = text[:move_start] + new_move + text[up_start:]
+
+          replace_once(
+              '  const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {\n    if (readOnly) return;\n    setCanvasActive(false);',
+              '  const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {\n    setCanvasActive(false);\n    if (event.pointerType === "pen") activePenPointers.current.delete(event.pointerId);'
+          )
+          replace_once(
+              '    const state = dragRef.current;\n    dragRef.current = undefined;\n    const straightenGesture = straightenGestureRef.current;',
+              '    const state = dragRef.current;\n    dragRef.current = undefined;\n    if (readOnly) {\n      interactionPageRef.current = undefined;\n      return;\n    }\n    const straightenGesture = straightenGestureRef.current;'
+          )
+          replace_once(
+              '    <section className="editor-shell">',
+              '    <section className={`editor-shell${props.publicMode ? ` public-editor public-${props.publicMode}` : ""}`}> '
+          )
+          replace_once(
+              '        readOnly={readOnly}\n        onUndo={props.onUndo}',
+              '        readOnly={readOnly}\n        {...(props.publicMode ? { publicMode: props.publicMode } : {})}\n        onUndo={props.onUndo}'
+          )
+          replace_once(
+              '        onBack={() => history.back()}',
+              '        onBack={() => {\n          if (props.publicMode) window.location.assign("/");\n          else history.back();\n        }}'
+          )
+          replace_once(
+              '              onNew={props.onAddPage}\n            />',
+              '              onNew={props.onAddPage}\n              canAdd={!readOnly}\n            />'
+          )
+
+          path.write_text(text)
+      - name: Check patch
+        run: git diff --check && git diff -- apps/web/src/components/EditorWorkspace.tsx
+      - name: Commit patch
+        run: |
+          git config user.name "notylo-bot"
+          git config user.email "notylo-bot@users.noreply.github.com"
+          git add apps/web/src/components/EditorWorkspace.tsx
+          git commit -m "Fix public and stylus touch navigation [public-mobile-patch]"
+          git push origin HEAD:fix/public-mobile-navigation-ui
