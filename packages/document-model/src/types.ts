@@ -115,6 +115,8 @@ export interface InkObject extends BaseObject {
   readonly size: number;
   readonly tool: "pen" | "pencil" | "highlighter";
   readonly smoothing: number;
+  /** Zoom at pointer-down. New ink uses it only to reduce streamline lag for precision writing. */
+  readonly captureZoom?: number;
   /** Brush preset used by the web renderer. Missing means a legacy tool preset. */
   readonly brushId?: string;
   /** Stored with the stroke so later preference changes do not alter old ink. */
