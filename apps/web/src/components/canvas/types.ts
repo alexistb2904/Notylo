@@ -14,6 +14,7 @@ export interface CanvasDraftInk {
   readonly color: string;
   readonly size: number;
   readonly smoothing: number;
+  readonly captureZoom: number;
   readonly brushId: string;
   readonly dynamics: InkDynamics;
   readonly straightLine?:

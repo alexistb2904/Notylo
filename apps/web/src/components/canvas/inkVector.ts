@@ -9,7 +9,14 @@ export type BrushKind = "ink" | "graphite" | "highlighter";
 type RenderPoint = RenderInkPoint;
 type InkLike = Pick<
   InkObject,
-  "color" | "size" | "tool" | "smoothing" | "brushId" | "dynamics" | "opacity"
+  | "color"
+  | "size"
+  | "tool"
+  | "smoothing"
+  | "captureZoom"
+  | "brushId"
+  | "dynamics"
+  | "opacity"
 > & { readonly points: readonly RenderPoint[] };
 
 export interface PressureMaskSegment {
@@ -80,6 +87,7 @@ export function getInkSvgPathData(
     (last.tiltY ?? 0).toFixed(2),
     object.size.toFixed(3),
     (object.smoothing ?? 0.55).toFixed(3),
+    (object.captureZoom ?? 1).toFixed(3),
     dynamics.pressureSensitivity.toFixed(3),
     dynamics.pressureAffectsWidth ? 1 : 0,
     kind
@@ -92,6 +100,7 @@ export function getInkSvgPathData(
     points,
     object.size,
     object.smoothing ?? 0.55,
+    object.captureZoom,
     dynamics,
     kind
   );
@@ -237,6 +246,19 @@ export function applyPressureCurve(pressure: number, sensitivity: number): numbe
   return Math.pow(input, Math.pow(2, 1 - setting * 2));
 }
 
+/**
+ * High zoom is used for tiny handwriting where positional latency is far more
+ * noticeable than on large strokes. Reduce only perfect-freehand's streamline
+ * at capture time; outline smoothing stays unchanged. The scale is stored with
+ * the stroke through captureZoom, so reopening or zooming the page never changes
+ * a finished line's geometry.
+ */
+export function streamlineScaleForCapture(captureZoom: number | undefined): number {
+  const zoom = Math.max(0.05, Math.min(10, captureZoom ?? 1));
+  if (zoom <= 1) return 1;
+  return Math.max(0.32, 1 / Math.sqrt(zoom));
+}
+
 function preparedInkPoints(object: InkLike): readonly RenderPoint[] {
   const points = object.points;
   const last = points.at(-1)!;
@@ -263,6 +285,7 @@ function perfectFreehandPath(
   points: readonly RenderPoint[],
   size: number,
   smoothing: number,
+  captureZoom: number | undefined,
   dynamics: InkDynamics,
   kind: BrushKind
 ): string {
@@ -271,11 +294,13 @@ function perfectFreehandPath(
   );
   const smooth = clamp01(smoothing);
   const profile = strokeProfile(kind);
+  const streamlineScale = streamlineScaleForCapture(captureZoom);
   const outline = getStroke(input, {
     size,
     thinning: dynamics.pressureAffectsWidth ? profile.thinning : 0,
     smoothing: profile.smoothingBase + smooth * profile.smoothingRange,
-    streamline: profile.streamlineBase + smooth * profile.streamlineRange,
+    streamline:
+      (profile.streamlineBase + smooth * profile.streamlineRange) * streamlineScale,
     simulatePressure: false,
     easing: (pressure) => applyPressureCurve(pressure, dynamics.pressureSensitivity),
     start: { cap: profile.roundCaps, taper: 0 },

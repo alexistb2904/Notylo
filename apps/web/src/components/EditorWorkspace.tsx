@@ -171,6 +171,8 @@ export function EditorWorkspace(props: Props) {
   const [selectionRect, setSelectionRect] = useState<Rect>();
   const [lasso, setLasso] = useState<readonly Point[]>([]);
   const [dragOffset, setDragOffset] = useState<Point>({ x: 0, y: 0 });
+  const dragOffsetRef = useRef<Point>({ x: 0, y: 0 });
+  const dragFrameRef = useRef<number | undefined>(undefined);
   const [showInspector, setShowInspector] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const [stylusOnly, setStylusOnly] = useState(() =>
@@ -262,6 +264,8 @@ export function EditorWorkspace(props: Props) {
     () => () => {
       const timer = straightenGestureRef.current?.timer;
       if (timer !== undefined) window.clearTimeout(timer);
+      if (dragFrameRef.current !== undefined)
+        window.cancelAnimationFrame(dragFrameRef.current);
     },
     []
   );
@@ -341,6 +345,21 @@ export function EditorWorkspace(props: Props) {
     [activePage, document.notebook.mode, pageOffsets, worldAt]
   );
   const syncSelection = useCallback(() => setSelectedIds(engine.current.selection), []);
+  const queueDragOffset = useCallback((offset: Point) => {
+    dragOffsetRef.current = offset;
+    if (dragFrameRef.current !== undefined) return;
+    dragFrameRef.current = window.requestAnimationFrame(() => {
+      dragFrameRef.current = undefined;
+      setDragOffset(dragOffsetRef.current);
+    });
+  }, []);
+  const resetDragOffset = useCallback(() => {
+    if (dragFrameRef.current !== undefined)
+      window.cancelAnimationFrame(dragFrameRef.current);
+    dragFrameRef.current = undefined;
+    dragOffsetRef.current = { x: 0, y: 0 };
+    setDragOffset({ x: 0, y: 0 });
+  }, []);
   const keepInsidePage = useCallback(
     <T extends DocumentObject>(object: T): T => {
       if (document.notebook.mode !== "book" || !object.pageId) return object;
@@ -483,6 +502,7 @@ export function EditorWorkspace(props: Props) {
         color: inkColor,
         size: tool === "highlighter" ? inkSize * 4 : inkSize,
         smoothing: inkSmoothing,
+        captureZoom: cameraRef.current.zoom,
         brushId: isShapeDrawing ? "ink-fineliner" : brushId,
         dynamics: inkDynamics,
         ...(isShapeDrawing ? { recognizeShape: true } : {})
@@ -548,6 +568,7 @@ export function EditorWorkspace(props: Props) {
         event.shiftKey ? "add" : event.ctrlKey || event.metaKey ? "toggle" : "replace"
       );
       syncSelection();
+      resetDragOffset();
       dragRef.current = {
         kind: "move",
         start: point,
@@ -592,7 +613,8 @@ export function EditorWorkspace(props: Props) {
       state.kind === "draw" ||
       state.kind === "erase" ||
       state.kind === "lasso" ||
-      state.kind === "pan"
+      state.kind === "pan" ||
+      state.kind === "move"
     )
       event.preventDefault();
     const drawInset = state.kind === "draw" ? (draftRef.current?.size ?? inkSize) / 2 + 2 : 0;
@@ -651,7 +673,7 @@ export function EditorWorkspace(props: Props) {
       return;
     }
     if (state.kind === "move") {
-      setDragOffset({ x: point.x - state.start.x, y: point.y - state.start.y });
+      queueDragOffset({ x: point.x - state.start.x, y: point.y - state.start.y });
       return;
     }
     if (state.kind === "select") {
@@ -709,6 +731,7 @@ export function EditorWorkspace(props: Props) {
           size: draft.size,
           tool: draft.tool,
           smoothing: draft.smoothing,
+          captureZoom: draft.captureZoom,
           brushId: draft.brushId,
           dynamics: draft.dynamics
         });
@@ -757,7 +780,7 @@ export function EditorWorkspace(props: Props) {
       }
     }
     if (state.kind === "move" && state.originals) {
-      const offset = dragOffset;
+      const offset = dragOffsetRef.current;
       if (offset.x || offset.y)
         props.onUpdate(
           state.originals,
@@ -766,7 +789,7 @@ export function EditorWorkspace(props: Props) {
           ),
           "Déplacer la sélection"
         );
-      setDragOffset({ x: 0, y: 0 });
+      resetDragOffset();
     }
     if (
       state.kind === "resize" &&
