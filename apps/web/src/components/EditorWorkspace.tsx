@@ -108,6 +108,7 @@ interface Props {
   readonly onReplace: (updater: (current: NotebookDocument) => NotebookDocument) => void;
   readonly onShare?: () => void;
   readonly readOnly?: boolean;
+  readonly publicMode?: "read" | "write";
 }
 interface EraserGestureState {
   readonly baseDocument: NotebookDocument;
@@ -193,6 +194,7 @@ export function EditorWorkspace(props: Props) {
   const dragRef = useRef<DragState | undefined>(undefined);
   const resizePointRef = useRef<Point | undefined>(undefined);
   const penRecentAt = useRef(0);
+  const activePenPointers = useRef(new Set<number>());
   const internalClipboard = useRef<readonly DocumentObject[]>([]);
   const paletteInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const touchPointers = useRef(new Map<number, Point>());
@@ -436,7 +438,6 @@ export function EditorWorkspace(props: Props) {
   );
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (readOnly) return;
     const isInkTool = tool === "pen" || tool === "pencil" || tool === "highlighter";
     const isShapeDrawing = tool === "shape" && shapeRecognition;
     const isIconDrawing = tool === "icon";
@@ -448,15 +449,19 @@ export function EditorWorkspace(props: Props) {
       tool === "lasso" ||
       tool === "hand";
     if (event.button !== 0 && event.button !== 1 && event.pointerType !== "pen") return;
-    if (event.button === 1 && event.pointerType === "mouse") {
-      event.preventDefault();
-      event.currentTarget.setPointerCapture(event.pointerId);
-      interactionPageRef.current = undefined;
-      dragRef.current = { kind: "pan", start: { x: event.clientX, y: event.clientY } };
-      return;
+
+    if (event.pointerType === "pen") {
+      activePenPointers.current.add(event.pointerId);
+      penRecentAt.current = Date.now();
     }
-    if (event.pointerType === "pen") penRecentAt.current = Date.now();
+
     if (event.pointerType === "touch") {
+      const touchNavigates = readOnly || (stylusOnly && (isInkTool || tool === "eraser"));
+      if (touchNavigates && !readOnly && activePenPointers.current.size > 0) {
+        event.preventDefault();
+        return;
+      }
+
       touchPointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (touchPointers.current.size === 2) {
         const points = [...touchPointers.current.values()];
@@ -473,11 +478,32 @@ export function EditorWorkspace(props: Props) {
         dragRef.current = undefined;
         setCanvasActive(false);
         event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        return;
+      }
+
+      if (touchNavigates) {
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        interactionPageRef.current = undefined;
+        dragRef.current = { kind: "pan", start: { x: event.clientX, y: event.clientY } };
         return;
       }
     }
-    if (stylusOnly && event.pointerType === "touch" && (isInkTool || tool === "eraser")) {
+
+    if (readOnly) {
       event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      interactionPageRef.current = undefined;
+      dragRef.current = { kind: "pan", start: { x: event.clientX, y: event.clientY } };
+      return;
+    }
+
+    if (event.button === 1 && event.pointerType === "mouse") {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      interactionPageRef.current = undefined;
+      dragRef.current = { kind: "pan", start: { x: event.clientX, y: event.clientY } };
       return;
     }
     if (
@@ -585,9 +611,10 @@ export function EditorWorkspace(props: Props) {
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (readOnly) return;
-    if (event.pointerType === "touch")
+    if (event.pointerType === "touch") {
+      if (!readOnly && stylusOnly && activePenPointers.current.size > 0) return;
       touchPointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    }
     if (pinch.current && touchPointers.current.size >= 2) {
       const points = [...touchPointers.current.values()];
       const currentDistance = distance(points[0]!, points[1]!);
@@ -620,6 +647,16 @@ export function EditorWorkspace(props: Props) {
       state.kind === "move"
     )
       event.preventDefault();
+    if (state.kind === "pan") {
+      setCamera((current) => ({
+        ...current,
+        x: current.x + event.clientX - state.start.x,
+        y: current.y + event.clientY - state.start.y
+      }));
+      dragRef.current = { ...state, start: { x: event.clientX, y: event.clientY } };
+      return;
+    }
+    if (readOnly) return;
     const drawInset = state.kind === "draw" ? (draftRef.current?.size ?? inkSize) / 2 + 2 : 0;
     const point = interactionPointAt(event, drawInset);
     if (state.kind === "draw" && draftRef.current) {
@@ -666,15 +703,6 @@ export function EditorWorkspace(props: Props) {
       );
       return;
     }
-    if (state.kind === "pan") {
-      setCamera((current) => ({
-        ...current,
-        x: current.x + event.clientX - state.start.x,
-        y: current.y + event.clientY - state.start.y
-      }));
-      dragRef.current = { ...state, start: { x: event.clientX, y: event.clientY } };
-      return;
-    }
     if (state.kind === "move") {
       queueDragOffset({ x: point.x - state.start.x, y: point.y - state.start.y });
       return;
@@ -689,8 +717,8 @@ export function EditorWorkspace(props: Props) {
   };
 
   const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (readOnly) return;
     setCanvasActive(false);
+    if (event.pointerType === "pen") activePenPointers.current.delete(event.pointerId);
     if (event.pointerType === "touch") {
       touchPointers.current.delete(event.pointerId);
       if (touchPointers.current.size < 2) pinch.current = undefined;
@@ -699,6 +727,10 @@ export function EditorWorkspace(props: Props) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     const state = dragRef.current;
     dragRef.current = undefined;
+    if (readOnly) {
+      interactionPageRef.current = undefined;
+      return;
+    }
     const straightenGesture = straightenGestureRef.current;
     const snappedToLine =
       straightenGesture?.pointerId === event.pointerId && draftRef.current?.straightLine;
@@ -1144,14 +1176,18 @@ export function EditorWorkspace(props: Props) {
   };
 
   return (
-    <section className="editor-shell">
+    <section className={`editor-shell${props.publicMode ? ` public-editor public-${props.publicMode}` : ""}`}>
       <EditorHeader
         document={document}
         saveState={props.saveState}
         readOnly={readOnly}
+        {...(props.publicMode ? { publicMode: props.publicMode } : {})}
         onUndo={props.onUndo}
         onRedo={props.onRedo}
-        onBack={() => history.back()}
+        onBack={() => {
+          if (props.publicMode) window.location.assign("/");
+          else history.back();
+        }}
         onExport={() => setShowExport(true)}
         {...(props.onShare ? { onShare: props.onShare } : {})}
         toolsOpen={mobileToolsOpen}
@@ -1417,6 +1453,7 @@ export function EditorWorkspace(props: Props) {
                 setCamera((current) => ({ ...current, y: -offset * current.zoom }));
               }}
               onNew={props.onAddPage}
+              canAdd={!readOnly}
             />
           )}
         </div>
