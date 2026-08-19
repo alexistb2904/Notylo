@@ -7,8 +7,9 @@ import type {
 } from "@notylo/document-model";
 import { memo, useMemo, type MutableRefObject } from "react";
 import {
-  getInkBaseAlpha,
   getInkSvgPathData,
+  getInkTexture,
+  getInkVisual,
   getPressureMaskSegments
 } from "./canvas/inkVector";
 
@@ -31,17 +32,12 @@ interface VectorIndexState {
   readonly order: ReadonlyMap<string, number>;
 }
 
-/**
- * Committed ink and shapes live in SVG, not in the raster canvas. Camera zoom
- * therefore changes only a vector transform and can never magnify an old bitmap.
- */
+/** Committed vector objects. No bitmap cache is involved at any zoom level. */
 export function VectorObjectLayer(props: Props) {
   const camera = props.cameraRef.current;
   const currentDocument = props.documentRef.current;
   const selectedIds = new Set(props.selection.map((object) => object.id));
-  const activeOffset = props.activePageId
-    ? (props.pageOffsets?.[props.activePageId] ?? 0)
-    : 0;
+  const activeOffset = props.activePageId ? (props.pageOffsets?.[props.activePageId] ?? 0) : 0;
   const indexState = useMemo(() => buildVectorIndex(currentDocument), [currentDocument]);
   const objects = visibleVectorObjects(props, camera, activeOffset, indexState);
 
@@ -57,22 +53,23 @@ export function VectorObjectLayer(props: Props) {
         width: "100%",
         height: "100%",
         pointerEvents: "none",
-        zIndex: 2
+        zIndex: 2,
+        overflow: "hidden"
       }}
     >
       <g
         transform={`translate(${props.origin.x + camera.x} ${props.origin.y + camera.y}) scale(${camera.zoom})`}
       >
         {objects.map((object) => {
-          const pageOffsetY = object.pageId
-            ? (props.pageOffsets?.[object.pageId] ?? 0)
-            : 0;
+          const pageOffsetY = object.pageId ? (props.pageOffsets?.[object.pageId] ?? 0) : 0;
           const selected = selectedIds.has(object.id);
           const dx = selected ? props.dragOffset.x : 0;
           const dy = pageOffsetY + (selected ? props.dragOffset.y : 0);
-          if (object.type === "ink")
-            return <SvgInk key={object.id} object={object} dx={dx} dy={dy} />;
-          return <SvgShape key={object.id} object={object} dx={dx} dy={dy} />;
+          return object.type === "ink" ? (
+            <SvgInk key={object.id} object={object} dx={dx} dy={dy} />
+          ) : (
+            <SvgShape key={object.id} object={object} dx={dx} dy={dy} />
+          );
         })}
       </g>
     </svg>
@@ -82,8 +79,6 @@ export function VectorObjectLayer(props: Props) {
 function buildVectorIndex(document: NotebookDocument): VectorIndexState {
   const objects = document.objects.filter(isVectorObject);
   const engine = new CanvasEngine();
-  // Whiteboard coordinates are already global, so the existing R-tree can cull
-  // thousands of off-screen strokes without touching their SVG path data.
   engine.setObjects(objects);
   const byPage = new Map<string, VectorObject[]>();
   const order = new Map<string, number>();
@@ -107,15 +102,13 @@ function visibleVectorObjects(
   if (props.documentMode === "whiteboard") {
     const viewport = whiteboardViewport(props.origin, camera);
     visible = state.engine
-      .objectsInViewport(expandRect(viewport, 96))
+      .objectsInViewport(expandRect(viewport, 96 / Math.max(camera.zoom, 0.05)))
       .filter(isVectorObject)
       .filter((object) => !object.pageId);
   } else {
     visible = [];
     for (const [pageId, objects] of state.byPage) {
       const offset = props.pageOffsets?.[pageId] ?? 0;
-      // Roughly two A4 pages of overscan keeps scrolling instant while bounding
-      // SVG node count for notebooks with hundreds of pages.
       if (Math.abs(offset - activeOffset) <= 2600) visible.push(...objects);
     }
   }
@@ -149,25 +142,27 @@ const SvgInk = memo(function SvgInk({
   readonly dx: number;
   readonly dy: number;
 }) {
-  const d = getInkSvgPathData(object, true, "full");
+  const d = getInkSvgPathData(object);
   if (!d) return null;
+  const visual = getInkVisual(object);
+  const texture = getInkTexture(object);
   const maskSegments = getPressureMaskSegments(object);
   const maskId = `ink-pressure-${safeSvgId(object.id)}`;
   const transform = dx || dy ? `translate(${dx} ${dy})` : undefined;
-  const fillOpacity = getInkBaseAlpha(object) * object.opacity;
+  const opacity = visual.baseAlpha * object.opacity;
 
   return (
-    <g transform={transform}>
+    <g transform={transform} style={{ mixBlendMode: visual.multiply ? "multiply" : "normal" }}>
       {maskSegments.length > 0 && (
         <defs>
           <mask
             id={maskId}
             maskUnits="userSpaceOnUse"
             maskContentUnits="userSpaceOnUse"
-            x={object.x - object.size * 3}
-            y={object.y - object.size * 3}
-            width={object.width + object.size * 6}
-            height={object.height + object.size * 6}
+            x={object.x - object.size * 4}
+            y={object.y - object.size * 4}
+            width={object.width + object.size * 8}
+            height={object.height + object.size * 8}
           >
             {maskSegments.map((segment, index) => (
               <line
@@ -178,7 +173,7 @@ const SvgInk = memo(function SvgInk({
                 y2={segment.to.y}
                 stroke="white"
                 strokeOpacity={segment.opacity}
-                strokeWidth={object.size * 2.4}
+                strokeWidth={object.size * 2.5}
                 strokeLinecap="round"
               />
             ))}
@@ -188,9 +183,20 @@ const SvgInk = memo(function SvgInk({
       <path
         d={d}
         fill={object.color}
-        fillOpacity={fillOpacity}
+        fillOpacity={opacity}
         mask={maskSegments.length ? `url(#${maskId})` : undefined}
       />
+      {texture?.d && (
+        <path
+          d={texture.d}
+          fill="none"
+          stroke={object.color}
+          strokeOpacity={texture.opacity * object.opacity}
+          strokeWidth={texture.strokeWidth}
+          strokeLinecap="round"
+          mask={maskSegments.length ? `url(#${maskId})` : undefined}
+        />
+      )}
     </g>
   );
 });
@@ -213,9 +219,7 @@ const SvgShape = memo(function SvgShape({
   };
 
   if (object.shape === "square" || object.shape === "rectangle")
-    return (
-      <rect transform={transform} width={object.width} height={object.height} {...common} />
-    );
+    return <rect transform={transform} width={object.width} height={object.height} {...common} />;
   if (object.shape === "circle" || object.shape === "ellipse")
     return (
       <ellipse
@@ -286,7 +290,7 @@ function whiteboardViewport(origin: Point, camera: Camera): Rect {
   const zoom = Math.max(0.05, camera.zoom);
   const width = typeof window === "undefined" ? 1920 : window.innerWidth;
   const height = typeof window === "undefined" ? 1080 : window.innerHeight;
-  const overscan = 420;
+  const overscan = 360;
   return {
     x: (-origin.x - camera.x - overscan) / zoom,
     y: (-origin.y - camera.y - overscan) / zoom,

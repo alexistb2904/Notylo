@@ -1,15 +1,10 @@
 import { getStroke } from "perfect-freehand";
-import type { InkDynamics, InkObject, InkPoint } from "@notylo/document-model";
+import type { InkDynamics, InkObject } from "@notylo/document-model";
 import type { Point } from "@notylo/canvas-engine";
+import { stabilizeInkPoints, type RenderInkPoint } from "../../lib/ink";
 
 export type InkRenderQuality = "economy" | "full";
-
-type RenderPoint = Pick<InkPoint, "x" | "y" | "pressure" | "tiltX" | "tiltY" | "timestamp">;
-type InkLike = Pick<
-  InkObject,
-  "color" | "size" | "tool" | "smoothing" | "brushId" | "dynamics" | "opacity"
-> & { readonly points: readonly RenderPoint[] };
-type BrushKind =
+export type BrushKind =
   | "ink"
   | "nib"
   | "graphite"
@@ -18,10 +13,28 @@ type BrushKind =
   | "paint"
   | "highlighter";
 
+type RenderPoint = RenderInkPoint;
+type InkLike = Pick<
+  InkObject,
+  "color" | "size" | "tool" | "smoothing" | "brushId" | "dynamics" | "opacity"
+> & { readonly points: readonly RenderPoint[] };
+
 export interface PressureMaskSegment {
   readonly from: Point;
   readonly to: Point;
   readonly opacity: number;
+}
+
+export interface BrushVisual {
+  readonly kind: BrushKind;
+  readonly baseAlpha: number;
+  readonly multiply: boolean;
+}
+
+export interface InkTexture {
+  readonly d: string;
+  readonly opacity: number;
+  readonly strokeWidth: number;
 }
 
 const DEFAULT_DYNAMICS: InkDynamics = {
@@ -31,36 +44,37 @@ const DEFAULT_DYNAMICS: InkDynamics = {
   tiltAffectsAngle: false
 };
 
+const preparedCache = new WeakMap<object, { readonly key: string; readonly points: readonly RenderPoint[] }>();
 const pathCache = new WeakMap<object, { readonly key: string; readonly path: string }>();
 
+export { stabilizeInkPoints } from "../../lib/ink";
+
 /**
- * Returns a resolution-independent SVG outline for one stroke. The common path
- * uses perfect-freehand; the tilt-aware nib fallback keeps Notylo's existing
- * stylus-angle behaviour without turning the stroke into bitmap dabs.
+ * Resolution-independent vector outline. `complete` and `quality` are retained in
+ * the signature for old callers, but neither is allowed to change the geometry.
+ * Performance profiles may simplify secondary texture, never the actual handwriting.
  */
 export function getInkSvgPathData(
   object: InkLike,
-  complete = true,
-  quality: InkRenderQuality = "full"
+  _complete = true,
+  _quality: InkRenderQuality = "full"
 ): string {
   if (!object.points.length) return "";
-  const points = boundedInput(object.points, complete, quality);
+  const points = preparedInkPoints(object);
   const last = points.at(-1)!;
   const dynamics = object.dynamics ?? DEFAULT_DYNAMICS;
-  const kind = brushKind(object.brushId, object.tool);
+  const kind = getInkBrushKind(object);
   const key = [
     points.length,
-    last.x.toFixed(2),
-    last.y.toFixed(2),
+    last.x.toFixed(3),
+    last.y.toFixed(3),
     last.pressure.toFixed(3),
-    object.size.toFixed(2),
+    object.size.toFixed(3),
     (object.smoothing ?? 0.55).toFixed(3),
     dynamics.pressureSensitivity.toFixed(3),
     dynamics.pressureAffectsWidth ? 1 : 0,
     dynamics.tiltAffectsAngle ? 1 : 0,
-    kind,
-    complete ? 1 : 0,
-    quality
+    kind
   ].join(":");
   const cacheKey = object.points as object;
   const cached = pathCache.get(cacheKey);
@@ -76,62 +90,127 @@ export function getInkSvgPathData(
   return path;
 }
 
-/** Canvas preview using exactly the same vector outline as the committed SVG. */
-export function drawInkVectorPreview(
+/** Used by OCR/export code paths that require a bitmap surface. */
+export function drawInkToCanvas(
   context: CanvasRenderingContext2D,
   object: InkLike,
   offset: Point,
-  complete: boolean,
-  alpha = 1,
-  quality: InkRenderQuality = "full"
+  alpha = 1
 ): void {
-  const pathData = getInkSvgPathData(object, complete, quality);
+  const pathData = getInkSvgPathData(object);
   if (!pathData) return;
   context.save();
   context.translate(offset.x, offset.y);
   context.fillStyle = object.color;
-  context.globalAlpha =
-    getInkBaseAlpha(object) * object.opacity * alpha * previewPressureOpacity(object);
+  context.globalAlpha = getInkBaseAlpha(object) * object.opacity * alpha * averagePressureOpacity(object);
   context.fill(new Path2D(pathData));
   context.restore();
 }
 
-export function getInkBaseAlpha(object: Pick<InkObject, "brushId" | "tool">): number {
-  switch (brushKind(object.brushId, object.tool)) {
-    case "graphite":
-      return 0.5;
-    case "graphite-soft":
-      return 0.62;
-    case "paint":
-      return 0.62;
-    case "highlighter":
-      return 0.24;
-    case "marker":
-      return 0.76;
-    case "nib":
-      return 0.96;
+/** Backward-compatible live helper. Shape is exactly the same as committed SVG. */
+export function drawInkVectorPreview(
+  context: CanvasRenderingContext2D,
+  object: InkLike,
+  offset: Point,
+  _complete: boolean,
+  alpha = 1,
+  _quality: InkRenderQuality = "full"
+): void {
+  drawInkToCanvas(context, object, offset, alpha);
+}
+
+export function getInkBrushKind(object: Pick<InkObject, "brushId" | "tool">): BrushKind {
+  switch (object.brushId) {
+    case "ink-calligraphy":
+      return "nib";
+    case "pencil-sketch":
+      return "graphite";
+    case "pencil-2b":
+      return "graphite-soft";
+    case "marker-medium":
+      return "marker";
+    case "wet-paint":
+      return "paint";
+    case "highlighter-flat":
+      return "highlighter";
     default:
-      return 0.99;
+      return object.tool === "pencil"
+        ? "graphite"
+        : object.tool === "highlighter"
+          ? "highlighter"
+          : "ink";
   }
 }
 
+export function getInkVisual(object: Pick<InkObject, "brushId" | "tool">): BrushVisual {
+  const kind = getInkBrushKind(object);
+  switch (kind) {
+    case "graphite":
+      return { kind, baseAlpha: 0.5, multiply: true };
+    case "graphite-soft":
+      return { kind, baseAlpha: 0.62, multiply: true };
+    case "paint":
+      return { kind, baseAlpha: 0.64, multiply: true };
+    case "highlighter":
+      return { kind, baseAlpha: 0.24, multiply: true };
+    case "marker":
+      return { kind, baseAlpha: 0.76, multiply: false };
+    case "nib":
+      return { kind, baseAlpha: 0.96, multiply: false };
+    default:
+      return { kind, baseAlpha: 0.99, multiply: false };
+  }
+}
+
+export function getInkTexture(object: InkLike): InkTexture | undefined {
+  const kind = getInkBrushKind(object);
+  const points = preparedInkPoints(object);
+  if (points.length < 2) return undefined;
+  if (kind === "graphite" || kind === "graphite-soft") {
+    const d = graphiteTexturePath(points, object.size, kind === "graphite-soft");
+    return d
+      ? {
+          d,
+          opacity: kind === "graphite-soft" ? 0.22 : 0.18,
+          strokeWidth: Math.max(0.2, object.size * (kind === "graphite-soft" ? 0.065 : 0.05))
+        }
+      : undefined;
+  }
+  if (kind === "paint") {
+    const d = paintBristlePath(points, object.size);
+    return d
+      ? { d, opacity: 0.2, strokeWidth: Math.max(0.28, object.size * 0.07) }
+      : undefined;
+  }
+  return undefined;
+}
+
+export function getInkBaseAlpha(object: Pick<InkObject, "brushId" | "tool">): number {
+  return getInkVisual(object).baseAlpha;
+}
+
+export function getLiveInkOpacity(object: InkLike): number {
+  return getInkBaseAlpha(object) * object.opacity * averagePressureOpacity(object);
+}
+
 /**
- * Vector pressure mask for the optional pressure->opacity mode. It is bounded
- * to a small number of segments so the rarely-used effect stays cheap in SVG.
+ * Vector pressure mask for optional pressure->opacity. Complexity is capped while
+ * following the same stabilised centre line as the visible stroke.
  */
 export function getPressureMaskSegments(
-  object: Pick<InkObject, "points" | "dynamics">,
+  object: Pick<InkObject, "points" | "dynamics" | "smoothing" | "size">,
   maximum = 40
 ): readonly PressureMaskSegment[] {
   const dynamics = object.dynamics ?? DEFAULT_DYNAMICS;
   if (!dynamics.pressureAffectsOpacity || object.points.length < 2) return [];
-  const segmentCount = Math.max(1, object.points.length - 1);
+  const points = stabilizeInkPoints(object.points, object.smoothing ?? 0.55, object.size);
+  const segmentCount = Math.max(1, points.length - 1);
   const stride = Math.max(1, Math.ceil(segmentCount / Math.max(1, maximum)));
   const result: PressureMaskSegment[] = [];
-  for (let index = 0; index < object.points.length - 1; index += stride) {
-    const endIndex = Math.min(object.points.length - 1, index + stride);
-    const from = object.points[index]!;
-    const to = object.points[endIndex]!;
+  for (let index = 0; index < points.length - 1; index += stride) {
+    const endIndex = Math.min(points.length - 1, index + stride);
+    const from = points[index]!;
+    const to = points[endIndex]!;
     const pressure =
       (applyPressureCurve(from.pressure, dynamics.pressureSensitivity) +
         applyPressureCurve(to.pressure, dynamics.pressureSensitivity)) /
@@ -151,6 +230,26 @@ export function applyPressureCurve(pressure: number, sensitivity: number): numbe
   return Math.pow(input, Math.pow(2, 1 - setting * 2));
 }
 
+function preparedInkPoints(object: InkLike): readonly RenderPoint[] {
+  const points = object.points;
+  const last = points.at(-1)!;
+  const key = [
+    points.length,
+    last.x.toFixed(3),
+    last.y.toFixed(3),
+    last.pressure.toFixed(3),
+    last.timestamp.toFixed(1),
+    (object.smoothing ?? 0.55).toFixed(3),
+    object.size.toFixed(3)
+  ].join(":");
+  const cacheKey = points as object;
+  const cached = preparedCache.get(cacheKey);
+  if (cached?.key === key) return cached.points;
+  const prepared = stabilizeInkPoints(points, object.smoothing ?? 0.55, object.size);
+  preparedCache.set(cacheKey, { key, points: prepared });
+  return prepared;
+}
+
 function perfectFreehandPath(
   points: readonly RenderPoint[],
   size: number,
@@ -166,8 +265,8 @@ function perfectFreehandPath(
   const outline = getStroke(input, {
     size,
     thinning: dynamics.pressureAffectsWidth ? thinningForKind(kind) : 0,
-    smoothing: 0.58 + smooth * 0.38,
-    streamline: 0.12 + smooth * 0.5,
+    smoothing: 0.62 + smooth * 0.34,
+    streamline: 0.08 + smooth * 0.24,
     simulatePressure: false,
     easing: (pressure) => applyPressureCurve(pressure, dynamics.pressureSensitivity),
     start: { cap: !flat, taper: 0 },
@@ -178,7 +277,11 @@ function perfectFreehandPath(
 }
 
 function svgPathFromOutline(points: readonly (readonly [number, number])[]): string {
-  if (points.length < 4) return "";
+  if (!points.length) return "";
+  if (points.length < 4) {
+    const [x, y] = points[0]!;
+    return circlePath(x, y, 0.35);
+  }
   const first = points[0]!;
   const second = points[1]!;
   const third = points[2]!;
@@ -213,18 +316,14 @@ function tiltAwareRibbonPath(
     const direction = Math.atan2(ty, tx);
     const tiltX = point.tiltX ?? 0;
     const tiltY = point.tiltY ?? 0;
-    const tipAngle =
-      Math.hypot(tiltX, tiltY) >= 3 ? Math.atan2(tiltY, tiltX) : Math.PI / 4;
+    const tipAngle = Math.hypot(tiltX, tiltY) >= 3 ? Math.atan2(tiltY, tiltX) : Math.PI / 4;
     const projected = tipProjection(kind, tipAngle, direction);
     return {
       x: point.x,
       y: point.y,
       nx: -ty,
       ny: tx,
-      halfWidth: Math.max(
-        0.14,
-        (size * pressureWidth(point.pressure, dynamics) * projected) / 2
-      )
+      halfWidth: Math.max(0.14, (size * pressureWidth(point.pressure, dynamics) * projected) / 2)
     };
   });
   const left = samples.map((sample) => ({
@@ -280,72 +379,99 @@ function tipProjection(kind: BrushKind, tipAngle: number, direction: number): nu
   );
 }
 
-function previewPressureOpacity(object: InkLike): number {
+function averagePressureOpacity(object: InkLike): number {
   const dynamics = object.dynamics ?? DEFAULT_DYNAMICS;
   if (!dynamics.pressureAffectsOpacity || !object.points.length) return 1;
-  const start = Math.max(0, object.points.length - 8);
+  const points = preparedInkPoints(object);
+  const start = Math.max(0, points.length - 10);
   let total = 0;
-  for (let index = start; index < object.points.length; index++)
-    total += applyPressureCurve(object.points[index]!.pressure, dynamics.pressureSensitivity);
-  return 0.08 + (total / (object.points.length - start)) * 0.92;
+  for (let index = start; index < points.length; index++)
+    total += applyPressureCurve(points[index]!.pressure, dynamics.pressureSensitivity);
+  return 0.08 + (total / Math.max(1, points.length - start)) * 0.92;
 }
 
-function boundedInput(
+function graphiteTexturePath(
   points: readonly RenderPoint[],
-  complete: boolean,
-  quality: InkRenderQuality
-): readonly RenderPoint[] {
-  if (complete) return points;
-  const maximum = quality === "economy" ? 420 : 760;
-  if (points.length <= maximum) return points;
-  const result: RenderPoint[] = [{ ...points[0]! }];
-  const stride = (points.length - 1) / (maximum - 1);
-  for (let index = 1; index < maximum - 1; index++)
-    result.push({ ...points[Math.min(points.length - 2, Math.round(index * stride))]! });
-  result.push({ ...points.at(-1)! });
-  return result;
+  size: number,
+  soft: boolean
+): string {
+  const targetMarks = soft ? 54 : 40;
+  const stride = Math.max(2, Math.ceil(points.length / targetMarks));
+  let d = "";
+  for (let index = 1; index < points.length - 1; index += stride) {
+    const previous = points[index - 1]!;
+    const point = points[index]!;
+    const next = points[index + 1]!;
+    let tx = next.x - previous.x;
+    let ty = next.y - previous.y;
+    const length = Math.hypot(tx, ty) || 1;
+    tx /= length;
+    ty /= length;
+    const nx = -ty;
+    const ny = tx;
+    const noise = pseudoRandom(index * 37 + Math.round(point.x * 3) + Math.round(point.y * 5));
+    const across = (noise - 0.5) * size * 0.7;
+    const markLength = Math.max(0.65, size * (0.18 + pseudoRandom(index * 71) * 0.22));
+    const x1 = point.x + nx * across - tx * markLength;
+    const y1 = point.y + ny * across - ty * markLength;
+    const x2 = point.x + nx * across + tx * markLength;
+    const y2 = point.y + ny * across + ty * markLength;
+    d += `M${fmt(x1)},${fmt(y1)} L${fmt(x2)},${fmt(y2)} `;
+  }
+  return d.trim();
+}
+
+function paintBristlePath(points: readonly RenderPoint[], size: number): string {
+  const lanes = [-0.38, 0.38];
+  let d = "";
+  lanes.forEach((lane, laneIndex) => {
+    points.forEach((point, index) => {
+      const previous = points[Math.max(0, index - 1)]!;
+      const next = points[Math.min(points.length - 1, index + 1)]!;
+      let tx = next.x - previous.x;
+      let ty = next.y - previous.y;
+      const length = Math.hypot(tx, ty) || 1;
+      tx /= length;
+      ty /= length;
+      const nx = -ty;
+      const ny = tx;
+      const wobble = (pseudoRandom(index * 53 + laneIndex * 101) - 0.5) * 0.12;
+      const offset = size * 0.5 * (lane + wobble);
+      const x = point.x + nx * offset;
+      const y = point.y + ny * offset;
+      d += `${index ? "L" : "M"}${fmt(x)},${fmt(y)} `;
+    });
+  });
+  return d.trim();
+}
+
+function pseudoRandom(seed: number): number {
+  const value = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+  return value - Math.floor(value);
 }
 
 function thinningForKind(kind: BrushKind): number {
   switch (kind) {
     case "highlighter":
-      return 0.12;
+      return 0.1;
     case "marker":
-      return 0.35;
+      return 0.32;
     case "graphite":
     case "graphite-soft":
-      return 0.72;
+      return 0.7;
     case "nib":
       return 0.78;
     case "paint":
-      return 0.68;
+      return 0.66;
     default:
-      return 0.58;
-  }
-}
-
-function brushKind(brushId: string | undefined, tool: InkObject["tool"]): BrushKind {
-  switch (brushId) {
-    case "ink-calligraphy":
-      return "nib";
-    case "pencil-sketch":
-      return "graphite";
-    case "pencil-2b":
-      return "graphite-soft";
-    case "marker-medium":
-      return "marker";
-    case "wet-paint":
-      return "paint";
-    case "highlighter-flat":
-      return "highlighter";
-    default:
-      return tool === "pencil" ? "graphite" : tool === "highlighter" ? "highlighter" : "ink";
+      return 0.56;
   }
 }
 
 function fmt(value: number): string {
-  return Number.isFinite(value) ? value.toFixed(2) : "0";
+  return Number.isFinite(value) ? value.toFixed(3) : "0";
 }
+
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
