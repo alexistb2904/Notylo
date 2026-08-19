@@ -1,8 +1,15 @@
 import { useState } from "react";
-import { authErrorMessage, useAuth } from "../lib/auth";
+import { authErrorMessage, isCloudUnavailable, useAuth } from "../lib/auth";
 
-export function AuthDialog({ onClose }: { onClose(): void }) {
-  const { login, register, loginWithPasskey, registrationEnabled } = useAuth();
+export function AuthDialog({ onClose, required = false }: { onClose(): void; required?: boolean }) {
+  const {
+    login,
+    register,
+    loginWithPasskey,
+    registrationEnabled,
+    cloudUnavailable,
+    continueOffline
+  } = useAuth();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -18,6 +25,10 @@ export function AuthDialog({ onClose }: { onClose(): void }) {
       else await login(email, password);
       onClose();
     } catch (reason) {
+      if (required && isCloudUnavailable(reason)) {
+        continueOffline();
+        return;
+      }
       setError(authErrorMessage(reason));
     } finally {
       setPending(false);
@@ -30,6 +41,10 @@ export function AuthDialog({ onClose }: { onClose(): void }) {
       await loginWithPasskey(email);
       onClose();
     } catch (reason) {
+      if (required && isCloudUnavailable(reason)) {
+        continueOffline();
+        return;
+      }
       setError(authErrorMessage(reason));
     } finally {
       setPending(false);
@@ -51,7 +66,11 @@ export function AuthDialog({ onClose }: { onClose(): void }) {
           <p className="eyebrow">Compte Notylo</p>
           <h2 id="auth-dialog-title">{createAccount ? "Créer un compte" : "Se connecter"}</h2>
           <p className="auth-intro">
-            Vos cahiers restent sur cet appareil. Le compte prépare l’accès aux services privés.
+            {cloudUnavailable
+              ? "Le cloud est indisponible pour le moment. Vos cahiers locaux restent accessibles."
+              : required
+                ? "Un compte autorisé est nécessaire pour accéder à cet espace."
+                : "Vos cahiers restent sur cet appareil. Le compte prépare l’accès aux services privés."}
           </p>
         </div>
         <label>
@@ -84,7 +103,7 @@ export function AuthDialog({ onClose }: { onClose(): void }) {
           </p>
         )}
         <div className="dialog-actions auth-actions">
-          {registrationEnabled && (
+          {(registrationEnabled || cloudUnavailable) && (
             <button
               className="text-button"
               type="button"
@@ -100,6 +119,15 @@ export function AuthDialog({ onClose }: { onClose(): void }) {
             {pending ? "Connexion…" : createAccount ? "Créer le compte" : "Se connecter"}
           </button>
         </div>
+        {required && cloudUnavailable && (
+          <button
+            className="outline-action offline-access-button"
+            type="button"
+            onClick={continueOffline}
+          >
+            Continuer hors connexion
+          </button>
+        )}
         {!createAccount && window.PublicKeyCredential && (
           <button
             className="outline-action passkey-login"
@@ -110,9 +138,11 @@ export function AuthDialog({ onClose }: { onClose(): void }) {
             Se connecter avec une passkey
           </button>
         )}
-        <button className="text-button menu-close" type="button" onClick={onClose}>
-          Continuer sans compte
-        </button>
+        {!required && (
+          <button className="text-button menu-close" type="button" onClick={onClose}>
+            Continuer sans compte
+          </button>
+        )}
       </form>
     </div>
   );

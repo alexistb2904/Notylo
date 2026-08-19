@@ -6,9 +6,11 @@ import {
   CircleHelp,
   LayoutPanelLeft,
   Palette,
+  PenTool,
   ScanText,
   SlidersHorizontal,
-  Sparkles
+  Sparkles,
+  X
 } from "lucide-react";
 
 type SidebarPosition = "left" | "right" | "hidden";
@@ -26,6 +28,7 @@ export function Inspector({
   whiteboardBackground,
   isWhiteboard,
   pageGap,
+  stylusOnly,
   onColor,
   onSize,
   onSmoothing,
@@ -37,6 +40,8 @@ export function Inspector({
   onPageGap,
   onAutoCalculate,
   onOcr,
+  onStylusOnly,
+  onClose,
   ocrBusy,
   ocrStatus
 }: {
@@ -52,6 +57,7 @@ export function Inspector({
   readonly whiteboardBackground?: PageBackground | undefined;
   readonly isWhiteboard: boolean;
   readonly pageGap: number;
+  readonly stylusOnly: boolean;
   onColor(value: string): void;
   onSize(value: number): void;
   onSmoothing(value: number): void;
@@ -63,6 +69,8 @@ export function Inspector({
   onPageGap(value: number): void;
   onAutoCalculate(value: boolean): void;
   onOcr(mode: OcrMode): void;
+  onStylusOnly(value: boolean): void;
+  onClose(): void;
   readonly ocrBusy: boolean;
   readonly ocrStatus: string | undefined;
 }) {
@@ -91,6 +99,9 @@ export function Inspector({
                   : "Espace"}
           </h2>
         </div>
+        <button className="inspector-close" onClick={onClose} aria-label="Fermer les réglages">
+          <X size={17} />
+        </button>
       </div>
       <section className="settings-section" aria-labelledby="stroke-settings">
         <h3 id="stroke-settings">Trait</h3>
@@ -270,6 +281,23 @@ export function Inspector({
             onChange={(event) => onShapeRecognition(event.target.checked)}
           />
         </label>
+        <label className="toggle-row compact-toggle stylus-only-setting">
+          <span className="setting-copy">
+            <span className="setting-icon">
+              <PenTool size={14} />
+            </span>
+            <span>
+              <strong>Écriture au stylet uniquement</strong>
+              <small>Le doigt déplace le canvas, mais ne peut pas créer de trait.</small>
+            </span>
+          </span>
+          <input
+            aria-label="Autoriser uniquement le stylet à écrire"
+            type="checkbox"
+            checked={stylusOnly}
+            onChange={(event) => onStylusOnly(event.target.checked)}
+          />
+        </label>
       </section>
       {isWhiteboard && (
         <section className="settings-section" aria-labelledby="background-settings">
@@ -344,10 +372,6 @@ export function Inspector({
             <Calculator size={16} /> Convertir en maths
           </button>
         </div>
-        <p className="inspector-note">
-          <CircleHelp size={13} /> OCR local dans votre navigateur, optimisé pour les notes et les
-          expressions mathématiques.
-        </p>
         {ocrStatus && (
           <p className="recognition-status" role="status">
             {ocrStatus}

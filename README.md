@@ -230,7 +230,7 @@ Local Docker configuration enables registration by default.
 5. Enter an email address and a password of at least 10 characters.
 6. After authentication, the library performs an initial cloud reconciliation.
 
-The account is only needed for cloud features. Existing local notebooks remain available when logged out.
+When `VITE_REQUIRE_AUTH=true`, the web application is private: a user must sign in before opening it. After a successful sign-in, a non-sensitive local marker keeps the local application available offline on that browser. Cloud operations still require a valid API token.
 
 ## Sessions
 
@@ -241,7 +241,9 @@ The API issues:
 
 The web client refreshes the session automatically while it is open, when the browser returns to the foreground and when the network comes back.
 
-Authentication data is currently kept in `sessionStorage`. This intentionally keeps the session browser-session scoped; a new browser session can therefore require signing in again.
+Authentication tokens remain in `sessionStorage`. The protected-web setting additionally stores only a local access marker in `localStorage`, so a previously authenticated browser can open local notebooks offline without persisting API credentials. Set `VITE_REQUIRE_AUTH=false` to keep the web application public.
+
+Because `VITE_*` values are compiled into the browser bundle, `VITE_REQUIRE_AUTH` is an application gate, not a secret or a replacement for server-side authorization. Cloud API routes continue to require authentication. To prevent unauthenticated users from downloading the static front-end itself, add authentication at the reverse proxy (for example, an SSO or an access gateway).
 
 ## Passkeys
 
