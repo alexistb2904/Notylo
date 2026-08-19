@@ -291,3 +291,5 @@ jobs:
           git add apps/web/src/components/EditorWorkspace.tsx
           git commit -m "Fix public and stylus touch navigation [public-mobile-patch]"
           git push origin HEAD:fix/public-mobile-navigation-ui
+
+# This update intentionally triggers the workflow after it exists on the branch.
