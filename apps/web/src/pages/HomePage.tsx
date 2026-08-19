@@ -643,7 +643,7 @@ export function HomePage() {
             </p>
             <div className="dialog-actions">
               <button className="text-button" onClick={() => setConfirmDelete(false)}>
-                Annuler
+                {t("common.cancel")}
               </button>
               <button className="danger-action" onClick={() => void deleteNotebook()}>
                 {t("home.deleteConfirm")}
