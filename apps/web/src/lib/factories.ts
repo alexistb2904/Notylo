@@ -42,6 +42,7 @@ export function newInk(
     size: number;
     tool: InkObject["tool"];
     smoothing?: number;
+    captureZoom?: number;
     brushId?: string;
     dynamics?: InkDynamics;
   }
@@ -54,6 +55,7 @@ export function newInk(
     size: input.size,
     tool: input.tool,
     smoothing: input.smoothing ?? 0.48,
+    ...(input.captureZoom !== undefined ? { captureZoom: input.captureZoom } : {}),
     ...(input.brushId ? { brushId: input.brushId } : {}),
     ...(input.dynamics ? { dynamics: input.dynamics } : {})
   };
