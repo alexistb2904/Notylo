@@ -37,7 +37,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in Coolify}
       REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-false}
-      DATABASE_URL: postgresql://notylo:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Coolify}@postgres:5432/notylo
+      DATABASE_URL: postgresql://notylo@postgres:5432/notylo
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Coolify}
       CORS_ORIGIN: ${CORS_ORIGIN:?Set CORS_ORIGIN to the public HTTPS origin}
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in Coolify}
