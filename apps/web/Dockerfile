@@ -8,9 +8,7 @@ COPY packages ./packages
 RUN corepack enable && pnpm install --frozen-lockfile
 
 ARG VITE_API_URL=/api
-ARG VITE_OCR_URL=/ocr
 ENV VITE_API_URL=$VITE_API_URL
-ENV VITE_OCR_URL=$VITE_OCR_URL
 
 RUN pnpm --filter @notylo/web build
 

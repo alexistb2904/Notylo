@@ -1,8 +1,0 @@
-fastapi==0.116.1
-uvicorn[standard]==0.35.0
-python-multipart==0.0.20
-pillow==11.3.0
-opencv-python-headless==4.12.0.88
-pytesseract==0.3.13
-# pix2tex is optional at runtime. Install it in deployments that enable math OCR.
-pix2tex==0.1.4

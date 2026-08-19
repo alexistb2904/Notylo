@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: notylo
       POSTGRES_USER: notylo
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Coolify}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
@@ -20,8 +20,8 @@ services:
     restart: unless-stopped
     command: server /data
     environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in .env}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY in .env}
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in Coolify}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY in Coolify}
     volumes:
       - minio_data:/data
 
@@ -35,16 +35,18 @@ services:
       PORT: 3001
       HOST: 0.0.0.0
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in Coolify}
       REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-false}
-      DATABASE_URL: postgresql://notylo:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/notylo
+      DATABASE_URL: postgresql://notylo:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Coolify}@postgres:5432/notylo
       CORS_ORIGIN: ${CORS_ORIGIN:?Set CORS_ORIGIN to the public HTTPS origin}
       MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in .env}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY in .env}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in Coolify}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY in Coolify}
       MINIO_BUCKET: ${MINIO_BUCKET:-notylo-assets}
       WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:?Set WEBAUTHN_RP_ID to the public domain}
       WEBAUTHN_ORIGIN: ${WEBAUTHN_ORIGIN:?Set WEBAUTHN_ORIGIN to the public HTTPS origin}
+    expose:
+      - "3001"
     depends_on:
       postgres:
         condition: service_healthy
@@ -62,38 +64,17 @@ services:
       timeout: 5s
       retries: 10
 
-  ocr:
-    build: ./services/ocr
-    restart: unless-stopped
-    environment:
-      OCR_TEXT_WORKERS: ${OCR_TEXT_WORKERS:-3}
-      OCR_MATH_WORKERS: ${OCR_MATH_WORKERS:-1}
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)"
-        ]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-
   web:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
         VITE_API_URL: /api
-        VITE_OCR_URL: /ocr
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:${WEB_PORT:-8080}:80"
+    expose:
+      - "80"
     depends_on:
       api:
-        condition: service_healthy
-      ocr:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
