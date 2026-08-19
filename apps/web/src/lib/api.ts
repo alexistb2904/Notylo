@@ -23,6 +23,8 @@ export type CloudDocumentResponse = {
   readonly document: unknown;
   readonly revision: number;
 };
+export type ShareMode = "read" | "write";
+export type PublicDocumentResponse = CloudDocumentResponse & { readonly mode: ShareMode };
 
 export class ApiError extends Error {
   constructor(
@@ -70,11 +72,7 @@ async function request<T>(
 
   const payload = (await response.json().catch(() => ({}))) as { error?: string } & T;
   if (!response.ok)
-    throw new ApiError(
-      response.status,
-      payload.error ?? "Une erreur est survenue.",
-      payload
-    );
+    throw new ApiError(response.status, payload.error ?? "Une erreur est survenue.", payload);
   return payload;
 }
 
@@ -103,10 +101,7 @@ async function requestBlob(path: string, init: RequestInit = {}): Promise<Blob> 
     return await response.blob();
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    throw new ApiError(
-      0,
-      "Le stockage cloud est indisponible. La copie locale reste accessible."
-    );
+    throw new ApiError(0, "Le stockage cloud est indisponible. La copie locale reste accessible.");
   } finally {
     window.clearTimeout(timeout);
     init.signal?.removeEventListener("abort", abortFromCaller);
@@ -136,6 +131,8 @@ export const api = {
     }),
   refresh: (refreshToken: string) =>
     request<AuthResponse>("/auth/refresh", { method: "POST", headers: bearer(refreshToken) }),
+  logout: (accessToken: string) =>
+    request<void>("/auth/logout", { method: "POST", headers: bearer(accessToken) }),
   me: (accessToken: string) =>
     request<{ user: Account }>("/auth/me", { headers: bearer(accessToken) }),
   updateProfile: (accessToken: string, displayName: string) =>
@@ -219,13 +216,7 @@ export const cloudApi = {
     request<CloudDocumentResponse>(`/cloud/notebooks/${encodeURIComponent(id)}`, {
       headers: bearer(token)
     }),
-  save: (
-    token: string,
-    id: string,
-    document: unknown,
-    baseRevision: number,
-    force = false
-  ) =>
+  save: (token: string, id: string, document: unknown, baseRevision: number, force = false) =>
     request<CloudDocumentResponse>(`/cloud/notebooks/${encodeURIComponent(id)}`, {
       method: "PUT",
       headers: { ...bearer(token), "Content-Type": "application/json" },
@@ -258,6 +249,49 @@ export const cloudApi = {
       `/cloud/notebooks/${encodeURIComponent(notebookId)}/assets/${encodeURIComponent(assetId)}`,
       { headers: bearer(token) }
     )
+};
+
+export const publicApi = {
+  load: (token: string) =>
+    request<PublicDocumentResponse>(`/public/notebooks/${encodeURIComponent(token)}`),
+  save: (token: string, document: unknown, baseRevision: number) =>
+    request<PublicDocumentResponse>(`/public/notebooks/${encodeURIComponent(token)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document, baseRevision })
+    }),
+  uploadAsset: (token: string, assetId: string, blob: Blob) =>
+    request<void>(
+      `/public/notebooks/${encodeURIComponent(token)}/assets/${encodeURIComponent(assetId)}`,
+      { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: blob },
+      120_000
+    ),
+  downloadAsset: (token: string, assetId: string) =>
+    requestBlob(
+      `/public/notebooks/${encodeURIComponent(token)}/assets/${encodeURIComponent(assetId)}`
+    )
+};
+
+export const sharingApi = {
+  status: (accessToken: string, notebookId: string) =>
+    request<{ enabled: boolean; mode?: ShareMode }>(
+      `/cloud/notebooks/${encodeURIComponent(notebookId)}/share`,
+      { headers: bearer(accessToken) }
+    ),
+  enable: (accessToken: string, notebookId: string, mode: ShareMode) =>
+    request<{ enabled: true; mode: ShareMode; path: string }>(
+      `/cloud/notebooks/${encodeURIComponent(notebookId)}/share`,
+      {
+        method: "POST",
+        headers: { ...bearer(accessToken), "Content-Type": "application/json" },
+        body: JSON.stringify({ mode })
+      }
+    ),
+  disable: (accessToken: string, notebookId: string) =>
+    request<void>(`/cloud/notebooks/${encodeURIComponent(notebookId)}/share`, {
+      method: "DELETE",
+      headers: bearer(accessToken)
+    })
 };
 
 function bearer(token: string): Record<string, string> {

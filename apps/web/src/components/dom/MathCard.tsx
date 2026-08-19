@@ -5,10 +5,12 @@ import type { DOMObjectUpdate } from "./types";
 
 export function MathCard({
   object,
-  onUpdate
+  onUpdate,
+  readOnly = false
 }: {
   readonly object: Extract<DocumentObject, { readonly type: "math" }>;
   readonly onUpdate: DOMObjectUpdate;
+  readonly readOnly?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [latex, setLatex] = useState(object.latex);
@@ -32,7 +34,9 @@ export function MathCard({
     return (
       <button
         className="math-object"
-        onDoubleClick={() => setEditing(true)}
+        onDoubleClick={() => {
+          if (!readOnly) setEditing(true);
+        }}
         title="Double-cliquez pour modifier le LaTeX"
         dangerouslySetInnerHTML={{
           __html: katex.renderToString(object.latex, {
@@ -44,7 +48,12 @@ export function MathCard({
     );
   } catch {
     return (
-      <button className="math-object math-error" onDoubleClick={() => setEditing(true)}>
+      <button
+        className="math-object math-error"
+        onDoubleClick={() => {
+          if (!readOnly) setEditing(true);
+        }}
+      >
         {object.latex}
       </button>
     );

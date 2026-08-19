@@ -4,6 +4,9 @@ import type { CloudDocument } from "./types.js";
 
 export async function ensureSchema(pool: Pool): Promise<void> {
   await pool.query(
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version BIGINT NOT NULL DEFAULT 0"
+  );
+  await pool.query(
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT ''"
   );
   await pool.query(
@@ -45,6 +48,12 @@ export async function ensureSchema(pool: Pool): Promise<void> {
   );
   await pool.query(
     "ALTER TABLE documents ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 1"
+  );
+  await pool.query(
+    "CREATE TABLE IF NOT EXISTS notebook_shares (notebook_id UUID PRIMARY KEY REFERENCES notebooks(id) ON DELETE CASCADE, token_hash TEXT NOT NULL UNIQUE, mode TEXT NOT NULL CHECK (mode IN ('read', 'write')), created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS notebook_shares_token_hash_idx ON notebook_shares(token_hash)"
   );
 }
 

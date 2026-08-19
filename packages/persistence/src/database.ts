@@ -32,7 +32,15 @@ export interface SyncQueueItem {
   readonly type: "document" | "asset" | "delete";
   readonly payload: unknown;
   readonly createdAt: number;
+  readonly scopeId?: string;
 }
+
+export interface NotebookScope {
+  readonly notebookId: string;
+  readonly scopeId: string;
+}
+
+export const anonymousScope = "anonymous";
 
 export class NotyloDatabase extends Dexie {
   notebooks!: EntityTable<Notebook, "id">;
@@ -43,6 +51,7 @@ export class NotyloDatabase extends Dexie {
   snapshots!: EntityTable<Snapshot, "id">;
   preferences!: EntityTable<Preference, "key">;
   syncQueue!: EntityTable<SyncQueueItem, "id">;
+  notebookScopes!: EntityTable<NotebookScope, "notebookId">;
 
   constructor() {
     super("notylo-notes");
@@ -56,6 +65,9 @@ export class NotyloDatabase extends Dexie {
       syncQueue: "id, notebookId, createdAt"
     });
     this.version(2).stores({ assetRefs: "key, notebookId, assetId, [notebookId+assetId]" });
+    this.version(3).stores({
+      notebookScopes: "notebookId, scopeId"
+    });
   }
 }
 

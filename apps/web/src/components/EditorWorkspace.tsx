@@ -106,6 +106,8 @@ interface Props {
   readonly onUndo: () => void;
   readonly onRedo: () => void;
   readonly onReplace: (updater: (current: NotebookDocument) => NotebookDocument) => void;
+  readonly onShare?: () => void;
+  readonly readOnly?: boolean;
 }
 interface EraserGestureState {
   readonly baseDocument: NotebookDocument;
@@ -119,6 +121,7 @@ const STRAIGHTEN_STILLNESS_PX = 4;
 
 export function EditorWorkspace(props: Props) {
   const { document } = props;
+  const readOnly = props.readOnly ?? false;
   const viewportRef = useRef<HTMLDivElement>(null);
   const engine = useRef(new CanvasEngine());
   const [camera, setCamera] = useState<Camera>(DEFAULT_CAMERA);
@@ -264,8 +267,7 @@ export function EditorWorkspace(props: Props) {
     () => () => {
       const timer = straightenGestureRef.current?.timer;
       if (timer !== undefined) window.clearTimeout(timer);
-      if (dragFrameRef.current !== undefined)
-        window.cancelAnimationFrame(dragFrameRef.current);
+      if (dragFrameRef.current !== undefined) window.cancelAnimationFrame(dragFrameRef.current);
     },
     []
   );
@@ -354,8 +356,7 @@ export function EditorWorkspace(props: Props) {
     });
   }, []);
   const resetDragOffset = useCallback(() => {
-    if (dragFrameRef.current !== undefined)
-      window.cancelAnimationFrame(dragFrameRef.current);
+    if (dragFrameRef.current !== undefined) window.cancelAnimationFrame(dragFrameRef.current);
     dragFrameRef.current = undefined;
     dragOffsetRef.current = { x: 0, y: 0 };
     setDragOffset({ x: 0, y: 0 });
@@ -435,6 +436,7 @@ export function EditorWorkspace(props: Props) {
   );
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (readOnly) return;
     const isInkTool = tool === "pen" || tool === "pencil" || tool === "highlighter";
     const isShapeDrawing = tool === "shape" && shapeRecognition;
     const isIconDrawing = tool === "icon";
@@ -583,6 +585,7 @@ export function EditorWorkspace(props: Props) {
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (readOnly) return;
     if (event.pointerType === "touch")
       touchPointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pinch.current && touchPointers.current.size >= 2) {
@@ -686,6 +689,7 @@ export function EditorWorkspace(props: Props) {
   };
 
   const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (readOnly) return;
     setCanvasActive(false);
     if (event.pointerType === "touch") {
       touchPointers.current.delete(event.pointerId);
@@ -992,6 +996,7 @@ export function EditorWorkspace(props: Props) {
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
+      if (readOnly) return;
       const point = defaultPosition(documentRefCount(props.documentRef));
       const own = event.clipboardData?.getData(INTERNAL_CLIPBOARD);
       if (own) {
@@ -1042,6 +1047,7 @@ export function EditorWorkspace(props: Props) {
       }
     };
     const onCopy = (event: ClipboardEvent) => {
+      if (readOnly) return;
       const selected = props.documentRef.current.objects.filter((object) =>
         selectedIds.includes(object.id)
       );
@@ -1051,6 +1057,7 @@ export function EditorWorkspace(props: Props) {
       event.preventDefault();
     };
     const onKeys = (event: KeyboardEvent) => {
+      if (readOnly) return;
       const target = event.target as HTMLElement | null;
       if (target?.isContentEditable || target?.tagName === "INPUT") return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
@@ -1110,7 +1117,7 @@ export function EditorWorkspace(props: Props) {
       window.removeEventListener("copy", onCopy);
       window.removeEventListener("keydown", onKeys);
     };
-  }, [document, activePage, selectedIds, insertFiles, props, syncSelection]);
+  }, [document, activePage, selectedIds, insertFiles, props, readOnly, syncSelection]);
 
   const updateObject = (
     before: DocumentObject,
@@ -1141,10 +1148,12 @@ export function EditorWorkspace(props: Props) {
       <EditorHeader
         document={document}
         saveState={props.saveState}
+        readOnly={readOnly}
         onUndo={props.onUndo}
         onRedo={props.onRedo}
         onBack={() => history.back()}
         onExport={() => setShowExport(true)}
+        {...(props.onShare ? { onShare: props.onShare } : {})}
         toolsOpen={mobileToolsOpen}
         onToggleTools={() => setMobileToolsOpen((value) => !value)}
       />
@@ -1153,33 +1162,35 @@ export function EditorWorkspace(props: Props) {
           mobileToolsOpen ? "mobile-tools-open" : ""
         }`}
       >
-        <EditorToolRail
-          tool={tool}
-          showBrushes={showBrushes}
-          showIcons={showIcons}
-          inspectorOpen={showInspector}
-          onToolChange={(nextTool) => {
-            setTool(nextTool);
-            setMobileToolsOpen(false);
-            if (nextTool === "pen") setBrushId("ink-fineliner");
-            if (nextTool === "pencil") setBrushId("pencil-sketch");
-            if (nextTool === "highlighter") setBrushId("highlighter-flat");
-          }}
-          onToggleBrushes={() => setShowBrushes((value) => !value)}
-          onToggleIcons={() => {
-            setShowIcons((value) => !value);
-            setShowBrushes(false);
-          }}
-          onImport={() =>
-            void webPlatform
-              .openFiles("image/*,.pdf,.docx,.xlsx,.xls,.csv,.txt,.md", true)
-              .then((files) => insertFiles(files))
-          }
-          onToggleInspector={() => {
-            setShowInspector((value) => !value);
-            setMobileToolsOpen(false);
-          }}
-        />
+        {!readOnly && (
+          <EditorToolRail
+            tool={tool}
+            showBrushes={showBrushes}
+            showIcons={showIcons}
+            inspectorOpen={showInspector}
+            onToolChange={(nextTool) => {
+              setTool(nextTool);
+              setMobileToolsOpen(false);
+              if (nextTool === "pen") setBrushId("ink-fineliner");
+              if (nextTool === "pencil") setBrushId("pencil-sketch");
+              if (nextTool === "highlighter") setBrushId("highlighter-flat");
+            }}
+            onToggleBrushes={() => setShowBrushes((value) => !value)}
+            onToggleIcons={() => {
+              setShowIcons((value) => !value);
+              setShowBrushes(false);
+            }}
+            onImport={() =>
+              void webPlatform
+                .openFiles("image/*,.pdf,.docx,.xlsx,.xls,.csv,.txt,.md", true)
+                .then((files) => insertFiles(files))
+            }
+            onToggleInspector={() => {
+              setShowInspector((value) => !value);
+              setMobileToolsOpen(false);
+            }}
+          />
+        )}
         <div
           className={`canvas-area ${
             tool === "pen" ||
@@ -1229,7 +1240,7 @@ export function EditorWorkspace(props: Props) {
             if (visiblePage) setCurrentPageId(visiblePage.id);
             const reachedBottom = nextY <= minY + 1;
             if (event.deltaY <= 0 || !reachedBottom) autoPageLockedRef.current = false;
-            if (event.deltaY > 0 && reachedBottom && !autoPageLockedRef.current) {
+            if (!readOnly && event.deltaY > 0 && reachedBottom && !autoPageLockedRef.current) {
               autoPageLockedRef.current = true;
               setCamera({ ...current, y: nextY });
               props.onAddPage();
@@ -1238,6 +1249,7 @@ export function EditorWorkspace(props: Props) {
             setCamera({ ...current, y: nextY });
           }}
           onDrop={(event) => {
+            if (readOnly) return;
             event.preventDefault();
             const hitPage = pageAt(worldAt(event));
             if (document.notebook.mode === "book" && !hitPage) return;
@@ -1265,33 +1277,35 @@ export function EditorWorkspace(props: Props) {
             dragOffset={dragOffset}
             renderContinuously={canvasActive}
           />
-          <WorkspaceDrawers
-            tool={tool}
-            paletteVisible={showPalette}
-            palette={palette}
-            paletteIndex={paletteIndex}
-            paletteInputRefs={paletteInputRefs}
-            showBrushes={showBrushes}
-            showIcons={showIcons}
-            iconShape={iconShape}
-            brushId={brushId}
-            onColor={setColor}
-            onPaletteColor={updatePaletteColor}
-            onCloseBrushes={() => setShowBrushes(false)}
-            onBrush={(brush) => {
-              setTool(brush.tool);
-              setBrushId(brush.id);
-              setInkSize(brush.size);
-              setInkSmoothing(brush.smoothing);
-              setShowBrushes(false);
-            }}
-            onCloseIcons={() => setShowIcons(false)}
-            onIcon={(shape) => {
-              setIconShape(shape);
-              setTool("icon");
-              setShowIcons(false);
-            }}
-          />
+          {!readOnly && (
+            <WorkspaceDrawers
+              tool={tool}
+              paletteVisible={showPalette}
+              palette={palette}
+              paletteIndex={paletteIndex}
+              paletteInputRefs={paletteInputRefs}
+              showBrushes={showBrushes}
+              showIcons={showIcons}
+              iconShape={iconShape}
+              brushId={brushId}
+              onColor={setColor}
+              onPaletteColor={updatePaletteColor}
+              onCloseBrushes={() => setShowBrushes(false)}
+              onBrush={(brush) => {
+                setTool(brush.tool);
+                setBrushId(brush.id);
+                setInkSize(brush.size);
+                setInkSmoothing(brush.smoothing);
+                setShowBrushes(false);
+              }}
+              onCloseIcons={() => setShowIcons(false)}
+              onIcon={(shape) => {
+                setIconShape(shape);
+                setTool("icon");
+                setShowIcons(false);
+              }}
+            />
+          )}
           <div
             className="document-space"
             style={{
@@ -1320,9 +1334,10 @@ export function EditorWorkspace(props: Props) {
                   dragOffset={selectedIds.includes(object.id) ? dragOffset : undefined}
                   offsetY={object.pageId ? (pageOffsets[object.pageId] ?? 0) : 0}
                   onUpdate={updateObject}
+                  readOnly={readOnly}
                 />
               ))}
-            {selectedObjects.length > 0 && (
+            {!readOnly && selectedObjects.length > 0 && (
               <SelectionBox
                 objects={selectedObjects}
                 dragOffset={dragOffset}
@@ -1344,7 +1359,8 @@ export function EditorWorkspace(props: Props) {
                 }}
               />
             )}
-            {selectedObjects.length === 1 &&
+            {!readOnly &&
+              selectedObjects.length === 1 &&
               selectedObjects[0]?.type === "shape" &&
               selectedObjects[0].shape === "poly-arrow" &&
               selectedObjects[0].points && (

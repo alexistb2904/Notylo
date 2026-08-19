@@ -42,7 +42,9 @@ describe("cloud synchronization", () => {
       new ApiError(410, "Ce cahier a été supprimé dans le cloud.", { deletedAt: Date.now() })
     );
 
-    await expect(uploadDocument("token", document, accountId)).rejects.toMatchObject({ status: 410 });
+    await expect(uploadDocument("token", document, accountId)).rejects.toMatchObject({
+      status: 410
+    });
 
     expect(await repository.load(document.notebook.id)).toBeDefined();
   });
@@ -56,7 +58,11 @@ describe("cloud synchronization", () => {
 
     const changed = {
       ...document,
-      notebook: { ...document.notebook, title: "Revision 2", updatedAt: document.notebook.updatedAt + 1 }
+      notebook: {
+        ...document.notebook,
+        title: "Revision 2",
+        updatedAt: document.notebook.updatedAt + 1
+      }
     };
     await repository.save(changed);
     mockedCloudApi.save.mockResolvedValue({ document: changed, revision: 2 });
@@ -79,13 +85,19 @@ describe("cloud synchronization", () => {
 
     const remote = {
       ...document,
-      notebook: { ...document.notebook, title: "Changed on device B", updatedAt: document.notebook.updatedAt + 1 }
+      notebook: {
+        ...document.notebook,
+        title: "Changed on device B",
+        updatedAt: document.notebook.updatedAt + 1
+      }
     };
     mockedCloudApi.load.mockResolvedValue({ document: remote, revision: 2 });
 
     const result = await pullCloudDocument("token", accountId, document);
 
     expect(result).toEqual({ kind: "updated", document: remote });
-    expect((await repository.load(document.notebook.id))?.notebook.title).toBe("Changed on device B");
+    expect(
+      (await new NotebookRepository(accountId).load(document.notebook.id))?.notebook.title
+    ).toBe("Changed on device B");
   });
 });

@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { EditorPage } from "./pages/EditorPage";
 import { HomePage } from "./pages/HomePage";
 import { PenDebugPage } from "./pages/PenDebugPage";
@@ -6,6 +6,7 @@ import { BenchmarkPage } from "./pages/BenchmarkPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { AuthDialog } from "./components/AuthDialog";
 import { useAuth } from "./lib/auth";
+import { PublicPage } from "./pages/PublicPage";
 
 const authRequired = ["true", "1", "yes"].includes(
   String(import.meta.env.VITE_REQUIRE_AUTH).toLowerCase()
@@ -20,6 +21,7 @@ export function App() {
         <Route path="/debug/pen" element={<PenDebugPage />} />
         <Route path="/debug/benchmark" element={<BenchmarkPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/public/:token" element={<PublicPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AccessGate>
@@ -28,6 +30,10 @@ export function App() {
 
 function AccessGate({ children }: { readonly children: React.ReactNode }) {
   const { ready, user, hasOfflineAccess } = useAuth();
+  const location = useLocation();
+  const isPublicShare = location.pathname.startsWith("/public/");
+
+  if (isPublicShare) return children;
 
   if (!authRequired || !ready) {
     if (!ready) {

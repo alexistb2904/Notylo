@@ -3,15 +3,17 @@ import type { DOMObjectUpdate } from "./types";
 
 export function EditableText({
   object,
-  onUpdate
+  onUpdate,
+  readOnly = false
 }: {
   readonly object: Extract<DocumentObject, { readonly type: "text" }>;
   readonly onUpdate: DOMObjectUpdate;
+  readonly readOnly?: boolean;
 }) {
   return (
     <div
       className="text-object"
-      contentEditable
+      contentEditable={!readOnly}
       suppressContentEditableWarning
       style={{
         fontFamily: object.fontFamily,

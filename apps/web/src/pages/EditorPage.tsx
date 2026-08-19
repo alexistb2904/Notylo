@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   createId,
@@ -9,6 +9,7 @@ import {
 import { NotebookRepository } from "@notylo/persistence";
 import { evaluateMath } from "@notylo/math-engine";
 import { EditorWorkspace } from "../components/EditorWorkspace";
+import { ShareDialog } from "../components/ShareDialog";
 import { useDocumentSession } from "../lib/session";
 import { useAuth } from "../lib/auth";
 import { ApiError } from "../lib/api";
@@ -20,24 +21,33 @@ import {
   type SyncConflict
 } from "../lib/cloud";
 
-const repository = new NotebookRepository();
-
 export function EditorPage() {
   const { id } = useParams();
+  const { ready, user } = useAuth();
+  const repository = useMemo(() => new NotebookRepository(user?.id), [user?.id]);
   const [loaded, setLoaded] = useState<NotebookDocument>();
   const [error, setError] = useState<string>();
 
   useEffect(() => {
-    if (!id) return;
-    void repository
-      .load(id)
-      .then((document) =>
-        document
-          ? setLoaded(document)
-          : setError("Ce cahier n’existe plus ou n’a pas été trouvé sur cet appareil.")
-      )
-      .catch(() => setError("Impossible d’ouvrir ce cahier. Vos autres cahiers restent intacts."));
-  }, [id]);
+    if (!id || !ready) return;
+    let active = true;
+    setLoaded(undefined);
+    setError(undefined);
+    void (async () => {
+      try {
+        if (user) await repository.claimAnonymous(user.id);
+        const document = await repository.load(id);
+        if (!active) return;
+        if (document) setLoaded(document);
+        else setError("Ce cahier n’existe plus ou n’a pas été trouvé dans cet espace.");
+      } catch {
+        if (active) setError("Impossible d’ouvrir ce cahier. Vos autres cahiers restent intacts.");
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [id, ready, repository, user]);
 
   if (error)
     return (
@@ -56,13 +66,20 @@ export function EditorPage() {
       </main>
     );
 
-  return <LoadedEditor key={loaded.notebook.id} initial={loaded} />;
+  return <LoadedEditor key={loaded.notebook.id} initial={loaded} repository={repository} />;
 }
 
-function LoadedEditor({ initial }: { readonly initial: NotebookDocument }) {
+function LoadedEditor({
+  initial,
+  repository
+}: {
+  readonly initial: NotebookDocument;
+  readonly repository: NotebookRepository;
+}) {
   const navigate = useNavigate();
-  const session = useDocumentSession(initial);
+  const session = useDocumentSession(initial, repository);
   const { accessToken, user, refreshSession } = useAuth();
+  const accountAtOpen = useRef(user?.id);
   const latestDocument = useRef(session.document);
   const debounceTimer = useRef<number | undefined>(undefined);
   const retryTimer = useRef<number | undefined>(undefined);
@@ -76,8 +93,15 @@ function LoadedEditor({ initial }: { readonly initial: NotebookDocument }) {
   >(navigator.onLine ? "saved" : "offline");
   const [conflict, setConflict] = useState<SyncConflict>();
   const [resolvingConflict, setResolvingConflict] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [sharePreparing, setSharePreparing] = useState(false);
+  const [shareError, setShareError] = useState<string>();
 
   latestDocument.current = session.document;
+
+  useEffect(() => {
+    if (accountAtOpen.current !== user?.id) navigate("/", { replace: true });
+  }, [navigate, user?.id]);
 
   const syncNow = useCallback(async () => {
     if (!accessToken || !user || !navigator.onLine || conflictBlocked.current) return;
@@ -225,6 +249,22 @@ function LoadedEditor({ initial }: { readonly initial: NotebookDocument }) {
     }
   };
 
+  const openShare = async () => {
+    if (!accessToken || !user || sharePreparing) return;
+    setSharePreparing(true);
+    setShareError(undefined);
+    try {
+      await uploadDocument(accessToken, session.document, user.id);
+      setShareOpen(true);
+    } catch (error) {
+      setShareError(
+        error instanceof Error ? error.message : "Le notebook doit d’abord être synchronisé."
+      );
+    } finally {
+      setSharePreparing(false);
+    }
+  };
+
   const add = (object: DocumentObject) =>
     session.commit({ kind: "add-object", object, label: "Ajouter un objet" });
 
@@ -301,7 +341,25 @@ function LoadedEditor({ initial }: { readonly initial: NotebookDocument }) {
         onUndo={session.undo}
         onRedo={session.redo}
         onReplace={session.replace}
+        onShare={() => void openShare()}
       />
+      {sharePreparing && (
+        <p className="public-share-progress" role="status">
+          Préparation du lien public…
+        </p>
+      )}
+      {shareError && (
+        <p className="profile-notice error" role="alert">
+          {shareError}
+        </p>
+      )}
+      {shareOpen && accessToken && (
+        <ShareDialog
+          accessToken={accessToken}
+          notebookId={session.document.notebook.id}
+          onClose={() => setShareOpen(false)}
+        />
+      )}
       {conflict && (
         <div className="modal-backdrop sync-conflict-backdrop" role="presentation">
           <section

@@ -1,7 +1,16 @@
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import type { DocumentObject, NotebookDocument, ShapeObject } from "@notylo/document-model";
 import type { SaveState } from "../../lib/session";
-import { ArrowLeft, ChevronDown, ChevronUp, PanelLeft, Plus, Redo2, Undo2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronUp,
+  PanelLeft,
+  Plus,
+  Redo2,
+  Share2,
+  Undo2
+} from "lucide-react";
 
 export function EditorHeader({
   document,
@@ -11,7 +20,9 @@ export function EditorHeader({
   onBack,
   onExport,
   toolsOpen,
-  onToggleTools
+  onToggleTools,
+  readOnly = false,
+  onShare
 }: {
   readonly document: NotebookDocument;
   readonly saveState: SaveState;
@@ -20,10 +31,13 @@ export function EditorHeader({
   onBack(): void;
   onExport(): void;
   readonly toolsOpen: boolean;
+  readonly readOnly?: boolean;
+  readonly onShare?: () => void;
   onToggleTools(): void;
 }) {
-  const label =
-    saveState === "saved"
+  const label = readOnly
+    ? "Lecture seule"
+    : saveState === "saved"
       ? "Enregistré sur cet appareil"
       : saveState === "cloud-synced"
         ? "Synchronisé dans le cloud"
@@ -50,20 +64,31 @@ export function EditorHeader({
         {label}
       </div>
       <div className="header-actions">
-        <button
-          className="mobile-tools-toggle"
-          onClick={onToggleTools}
-          aria-label={toolsOpen ? "Masquer les outils" : "Afficher les outils"}
-          aria-expanded={toolsOpen}
-        >
-          <PanelLeft size={17} />
-        </button>
-        <button onClick={onUndo} aria-label="Annuler">
-          <Undo2 size={17} />
-        </button>
-        <button onClick={onRedo} aria-label="Rétablir">
-          <Redo2 size={17} />
-        </button>
+        {!readOnly && (
+          <button
+            className="mobile-tools-toggle"
+            onClick={onToggleTools}
+            aria-label={toolsOpen ? "Masquer les outils" : "Afficher les outils"}
+            aria-expanded={toolsOpen}
+          >
+            <PanelLeft size={17} />
+          </button>
+        )}
+        {!readOnly && (
+          <button onClick={onUndo} aria-label="Annuler">
+            <Undo2 size={17} />
+          </button>
+        )}
+        {!readOnly && (
+          <button onClick={onRedo} aria-label="Rétablir">
+            <Redo2 size={17} />
+          </button>
+        )}
+        {onShare && (
+          <button className="share-button" onClick={onShare}>
+            <Share2 size={15} /> Partager
+          </button>
+        )}
         <button className="share-button" onClick={onExport}>
           Exporter
         </button>

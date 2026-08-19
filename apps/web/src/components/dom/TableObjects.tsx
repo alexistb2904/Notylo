@@ -3,10 +3,12 @@ import type { DOMObjectUpdate } from "./types";
 
 export function NoteTable({
   object,
-  onUpdate
+  onUpdate,
+  readOnly = false
 }: {
   readonly object: Extract<DocumentObject, { readonly type: "table" }>;
   readonly onUpdate: DOMObjectUpdate;
+  readonly readOnly?: boolean;
 }) {
   return (
     <table className="note-table">
@@ -16,7 +18,7 @@ export function NoteTable({
             {row.map((cell, colIndex) => (
               <td
                 key={cell.id}
-                contentEditable
+                contentEditable={!readOnly}
                 suppressContentEditableWarning
                 onBlur={(event) => {
                   const text = event.currentTarget.textContent ?? "";
@@ -52,10 +54,12 @@ export function NoteTable({
 
 export function Spreadsheet({
   object,
-  onUpdate
+  onUpdate,
+  readOnly = false
 }: {
   readonly object: Extract<DocumentObject, { readonly type: "spreadsheet" }>;
   readonly onUpdate: DOMObjectUpdate;
+  readonly readOnly?: boolean;
 }) {
   const coordinates = Object.keys(object.cells);
   const maxRow = Math.max(
@@ -90,7 +94,7 @@ export function Spreadsheet({
                 return (
                   <td
                     key={key}
-                    contentEditable
+                    contentEditable={!readOnly}
                     suppressContentEditableWarning
                     onBlur={(event) => {
                       const value = event.currentTarget.textContent ?? "";

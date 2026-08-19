@@ -6,23 +6,25 @@ import type {
   Page
 } from "@notylo/document-model";
 import { createId, migrateDocument } from "@notylo/document-model";
-import { getDatabase, type StoredAsset } from "./database";
+import { anonymousScope, getDatabase, type StoredAsset } from "./database";
 
 function deletionQueueId(notebookId: string): string {
   return `delete:${notebookId}`;
 }
 
 export class NotebookRepository {
+  constructor(readonly scopeId = anonymousScope) {}
+
   async save(document: NotebookDocument): Promise<void> {
     const db = getDatabase();
     await db.transaction(
       "rw",
-      db.notebooks,
-      db.pages,
-      db.objects,
-      db.assetRefs,
-      db.syncQueue,
+      [db.notebooks, db.pages, db.objects, db.assetRefs, db.syncQueue, db.notebookScopes],
       async () => {
+        const existingScope = await db.notebookScopes.get(document.notebook.id);
+        if (existingScope && existingScope.scopeId !== this.scopeId)
+          throw new Error("Ce cahier local appartient à un autre espace.");
+        await db.notebookScopes.put({ notebookId: document.notebook.id, scopeId: this.scopeId });
         await db.syncQueue.delete(deletionQueueId(document.notebook.id));
         await db.notebooks.put(document.notebook);
         await db.pages.where("notebookId").equals(document.notebook.id).delete();
@@ -45,6 +47,9 @@ export class NotebookRepository {
     const db = getDatabase();
     const notebook = await db.notebooks.get(notebookId);
     if (!notebook) return undefined;
+    const scope = await db.notebookScopes.get(notebookId);
+    if (scope && scope.scopeId !== this.scopeId) return undefined;
+    if (!scope && this.scopeId !== anonymousScope) return undefined;
     const [pages, objects, refs] = await Promise.all([
       db.pages.where("notebookId").equals(notebookId).sortBy("index"),
       db.objects.where("notebookId").equals(notebookId).toArray(),
@@ -63,8 +68,38 @@ export class NotebookRepository {
   }
 
   async list(): Promise<readonly NotebookSummary[]> {
-    const notebooks = await getDatabase().notebooks.orderBy("updatedAt").reverse().toArray();
-    return notebooks.map(({ id, title, mode, updatedAt }) => ({ id, title, mode, updatedAt }));
+    const db = getDatabase();
+    const [notebooks, scopes] = await Promise.all([
+      db.notebooks.orderBy("updatedAt").reverse().toArray(),
+      db.notebookScopes.toArray()
+    ]);
+    const scopeByNotebook = new Map(scopes.map((scope) => [scope.notebookId, scope.scopeId]));
+    return notebooks
+      .filter(({ id }) => {
+        const scope = scopeByNotebook.get(id);
+        return scope ? scope === this.scopeId : this.scopeId === anonymousScope;
+      })
+      .map(({ id, title, mode, updatedAt }) => ({ id, title, mode, updatedAt }));
+  }
+
+  async claimAnonymous(scopeId: string): Promise<void> {
+    if (!scopeId || scopeId === anonymousScope) return;
+    const db = getDatabase();
+    await db.transaction("rw", db.notebooks, db.notebookScopes, async () => {
+      const [notebooks, scopes] = await Promise.all([
+        db.notebooks.toArray(),
+        db.notebookScopes.toArray()
+      ]);
+      const scopeByNotebook = new Map(scopes.map((scope) => [scope.notebookId, scope.scopeId]));
+      await db.notebookScopes.bulkPut(
+        notebooks
+          .filter((notebook) => {
+            const currentScope = scopeByNotebook.get(notebook.id);
+            return !currentScope || currentScope === anonymousScope;
+          })
+          .map((notebook) => ({ notebookId: notebook.id, scopeId }))
+      );
+    });
   }
 
   async remove(notebookId: string): Promise<void> {
@@ -80,9 +115,24 @@ export class NotebookRepository {
     const now = Date.now();
     await db.transaction(
       "rw",
-      [db.notebooks, db.pages, db.objects, db.snapshots, db.assets, db.assetRefs, db.syncQueue],
+      [
+        db.notebooks,
+        db.pages,
+        db.objects,
+        db.snapshots,
+        db.assets,
+        db.assetRefs,
+        db.syncQueue,
+        db.notebookScopes
+      ],
       async () => {
         const notebook = await db.notebooks.get(notebookId);
+        const scope = await db.notebookScopes.get(notebookId);
+        if (
+          (scope && scope.scopeId !== this.scopeId) ||
+          (!scope && this.scopeId !== anonymousScope)
+        )
+          return;
         const refs = await db.assetRefs.where("notebookId").equals(notebookId).toArray();
         await db.syncQueue.where("notebookId").equals(notebookId).delete();
         if (queueCloudDelete) {
@@ -91,10 +141,12 @@ export class NotebookRepository {
             notebookId,
             type: "delete",
             payload: { deletedAt: now, ...(notebook ? { title: notebook.title } : {}) },
-            createdAt: now
+            createdAt: now,
+            scopeId: this.scopeId
           });
         }
         await db.notebooks.delete(notebookId);
+        await db.notebookScopes.delete(notebookId);
         await db.pages.where("notebookId").equals(notebookId).delete();
         await db.objects.where("notebookId").equals(notebookId).delete();
         await db.snapshots.where("notebookId").equals(notebookId).delete();

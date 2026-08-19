@@ -8,7 +8,13 @@ import type {
 } from "@simplewebauthn/server";
 
 export type Credentials = { email: string; password: string };
-export type StoredUser = { id: string; email: string; password_hash: string; display_name: string };
+export type StoredUser = {
+  id: string;
+  email: string;
+  password_hash: string;
+  display_name: string;
+  session_version?: string | number;
+};
 export type Account = Pick<StoredUser, "id" | "email" | "display_name">;
 export type PasswordChange = { currentPassword: string; newPassword: string };
 export type ProfileChange = { displayName: string };
@@ -25,6 +31,7 @@ export type NotebookDeletionRequest = {
   baseRevision?: number;
   force?: boolean;
 };
+export type NotebookShareMode = "read" | "write";
 export type StoredPasskey = {
   id: string;
   user_id: string;
@@ -62,6 +69,6 @@ export type DbClient = PoolClient;
 
 declare module "@fastify/jwt" {
   interface FastifyJWT {
-    user: { sub: string; email?: string; type?: "refresh" };
+    user: { sub: string; email?: string; type?: "refresh"; sessionVersion?: number };
   }
 }

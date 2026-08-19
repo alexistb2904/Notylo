@@ -1,16 +1,18 @@
 import type { NotebookDocument } from "@notylo/document-model";
-import { getDatabase, NotebookRepository } from "@notylo/persistence";
+import { anonymousScope, getDatabase, NotebookRepository } from "@notylo/persistence";
 import { ApiError, cloudApi, type CloudDocumentResponse } from "./api";
 
-const repository = new NotebookRepository();
 const syncMetaPrefix = "cloud-sync:";
+
+function repositoryFor(accountId?: string): NotebookRepository {
+  return new NotebookRepository(accountId ?? anonymousScope);
+}
 
 type CloudSyncMeta = {
   readonly version: 2;
   readonly revision: number;
   readonly documentUpdatedAt: number;
   readonly assetHashes: Readonly<Record<string, string>>;
-  /** Locks an IndexedDB copy to the account that first synchronized it. */
   readonly accountId?: string;
   readonly syncedAt: number;
 };
@@ -42,9 +44,7 @@ type LocalDeletionSyncConflict = {
 };
 
 export type SyncConflict =
-  | DocumentSyncConflict
-  | RemoteDeletionSyncConflict
-  | LocalDeletionSyncConflict;
+  DocumentSyncConflict | RemoteDeletionSyncConflict | LocalDeletionSyncConflict;
 
 export type CloudPullResult =
   | { readonly kind: "unchanged" }
@@ -52,10 +52,6 @@ export type CloudPullResult =
   | { readonly kind: "deleted" }
   | { readonly kind: "conflict"; readonly conflict: SyncConflict };
 
-/**
- * Uploads one complete document using optimistic concurrency. The server only
- * accepts the write when the revision we last synchronized is still current.
- */
 export async function uploadDocument(
   accessToken: string,
   document: NotebookDocument,
@@ -71,8 +67,6 @@ export async function uploadDocument(
   );
   if (!response) throw new ApiError(502, "Réponse cloud invalide.");
 
-  // Commit the document checkpoint before attachments. A failed attachment
-  // upload is retried later without re-submitting the whole document.
   await writeSyncMeta(
     notebookId,
     response.revision,
@@ -83,7 +77,8 @@ export async function uploadDocument(
   const assetHashes = await uploadChangedAssets(
     accessToken,
     document,
-    meta?.assetHashes ?? {}
+    meta?.assetHashes ?? {},
+    accountId
   );
   await writeSyncMeta(
     notebookId,
@@ -94,7 +89,6 @@ export async function uploadDocument(
   );
 }
 
-/** Creates a cloud record immediately while keeping the local copy authoritative on failure. */
 export async function createCloudDocument(
   accessToken: string,
   accountId: string,
@@ -102,8 +96,14 @@ export async function createCloudDocument(
 ): Promise<void> {
   const response = asCloudResponse(await cloudApi.create(accessToken, document));
   if (!response) throw new ApiError(502, "Réponse cloud invalide.");
-  await writeSyncMeta(document.notebook.id, response.revision, document.notebook.updatedAt, {}, accountId);
-  const assetHashes = await uploadChangedAssets(accessToken, document, {});
+  await writeSyncMeta(
+    document.notebook.id,
+    response.revision,
+    document.notebook.updatedAt,
+    {},
+    accountId
+  );
+  const assetHashes = await uploadChangedAssets(accessToken, document, {}, accountId);
   await writeSyncMeta(
     document.notebook.id,
     response.revision,
@@ -113,15 +113,12 @@ export async function createCloudDocument(
   );
 }
 
-/**
- * Reconciles the library after sign-in, on reconnect, and periodically while
- * the page is visible. Remote changes win only when this device has no local
- * edit since its last confirmed revision; otherwise we surface a choice.
- */
 export async function reconcileCloud(
   accessToken: string,
   accountId?: string
 ): Promise<readonly SyncConflict[]> {
+  const repository = repositoryFor(accountId);
+  if (accountId) await repository.claimAnonymous(accountId);
   const conflicts = [...(await flushPendingDeletes(accessToken, accountId))];
   const remote = await cloudApi.list(accessToken);
   const remoteDeleted = remote.deletedNotebooks ?? [];
@@ -167,7 +164,12 @@ export async function reconcileCloud(
     if (!localSummary) {
       const remoteDocument = await loadCloudDocument(accessToken, entry.id);
       if (!remoteDocument) continue;
-      const assetHashes = await downloadAssets(accessToken, remoteDocument.document);
+      const assetHashes = await downloadAssets(
+        accessToken,
+        remoteDocument.document,
+        false,
+        accountId
+      );
       await repository.save(remoteDocument.document);
       await writeSyncMeta(
         entry.id,
@@ -184,18 +186,23 @@ export async function reconcileCloud(
     const localDocument = await repository.load(entry.id);
     if (!localDocument) continue;
 
-    // A legacy/local copy can be adopted without a conflict only when it is
-    // demonstrably the same snapshot that is already in the cloud.
     if (!meta) {
       if (localDocument.notebook.updatedAt !== entry.updatedAt) {
         const remoteDocument = await loadCloudDocument(accessToken, entry.id);
         if (remoteDocument)
-          conflicts.push(documentConflict(entry.id, localSummary.title, localDocument, remoteDocument));
+          conflicts.push(
+            documentConflict(entry.id, localSummary.title, localDocument, remoteDocument)
+          );
         continue;
       }
       const remoteDocument = await loadCloudDocument(accessToken, entry.id);
       if (!remoteDocument) continue;
-      const assetHashes = await downloadAssets(accessToken, remoteDocument.document, true);
+      const assetHashes = await downloadAssets(
+        accessToken,
+        remoteDocument.document,
+        true,
+        accountId
+      );
       await repository.save(remoteDocument.document);
       await writeSyncMeta(
         entry.id,
@@ -213,7 +220,9 @@ export async function reconcileCloud(
     if (localChanged && remoteChanged) {
       const remoteDocument = await loadCloudDocument(accessToken, entry.id);
       if (remoteDocument)
-        conflicts.push(documentConflict(entry.id, localSummary.title, localDocument, remoteDocument));
+        conflicts.push(
+          documentConflict(entry.id, localSummary.title, localDocument, remoteDocument)
+        );
       continue;
     }
 
@@ -231,7 +240,12 @@ export async function reconcileCloud(
     if (remoteChanged) {
       const remoteDocument = await loadCloudDocument(accessToken, entry.id);
       if (!remoteDocument) continue;
-      const assetHashes = await downloadAssets(accessToken, remoteDocument.document);
+      const assetHashes = await downloadAssets(
+        accessToken,
+        remoteDocument.document,
+        false,
+        accountId
+      );
       await repository.save(remoteDocument.document);
       await writeSyncMeta(
         entry.id,
@@ -244,12 +258,12 @@ export async function reconcileCloud(
     }
 
     let assetHashes: Readonly<Record<string, string>> = meta.assetHashes;
-    assetHashes = await uploadChangedAssets(accessToken, localDocument, assetHashes);
+    assetHashes = await uploadChangedAssets(accessToken, localDocument, assetHashes, accountId);
     const remoteDocument = await loadCloudDocument(accessToken, entry.id);
     if (remoteDocument) {
       assetHashes = {
         ...assetHashes,
-        ...(await downloadAssets(accessToken, remoteDocument.document, true))
+        ...(await downloadAssets(accessToken, remoteDocument.document, true, accountId))
       };
       await writeSyncMeta(
         entry.id,
@@ -285,6 +299,8 @@ export async function pullCloudDocument(
   accountId: string,
   local: NotebookDocument
 ): Promise<CloudPullResult> {
+  const repository = repositoryFor(accountId);
+  if (accountId) await repository.claimAnonymous(accountId);
   const meta = await readSyncMeta(local.notebook.id);
   if (!belongsToActiveAccount(meta, accountId)) return { kind: "unchanged" };
 
@@ -299,7 +315,7 @@ export async function pullCloudDocument(
           conflict: documentConflict(local.notebook.id, local.notebook.title, local, remote)
         };
 
-      const assetHashes = await downloadAssets(accessToken, remote.document);
+      const assetHashes = await downloadAssets(accessToken, remote.document, false, accountId);
       await repository.save(remote.document);
       await writeSyncMeta(
         local.notebook.id,
@@ -338,15 +354,19 @@ export async function flushPendingDeletes(
   accountId?: string
 ): Promise<readonly SyncConflict[]> {
   const db = getDatabase();
+  const activeScope = accountId ?? anonymousScope;
   const pending = (await db.syncQueue.toArray())
-    .filter((item) => item.type === "delete")
+    .filter(
+      (item) =>
+        item.type === "delete" &&
+        (item.scopeId ? item.scopeId === activeScope : activeScope === anonymousScope)
+    )
     .sort((left, right) => left.createdAt - right.createdAt);
   const conflicts: SyncConflict[] = [];
 
   for (const item of pending) {
     const meta = await readSyncMeta(item.notebookId);
     if (!meta) {
-      // This notebook never reached the cloud, so there is nothing to delete remotely.
       await db.syncQueue.delete(item.id);
       continue;
     }
@@ -383,6 +403,7 @@ export async function resolveConflict(
   keep: "local" | "cloud",
   accountId?: string
 ): Promise<void> {
+  const repository = repositoryFor(accountId);
   if (conflict.kind === "deleted") {
     if (keep === "local") await uploadDocument(accessToken, conflict.local, accountId, true);
     else {
@@ -403,7 +424,8 @@ export async function resolveConflict(
       );
       await getDatabase().syncQueue.delete(`delete:${conflict.notebookId}`);
       await clearSyncMeta(conflict.notebookId);
-    } else await acceptCloudDocument(accessToken, conflict.cloud, conflict.cloudRevision, accountId);
+    } else
+      await acceptCloudDocument(accessToken, conflict.cloud, conflict.cloudRevision, accountId);
     return;
   }
 
@@ -435,16 +457,25 @@ async function acceptCloudDocument(
   revision: number,
   accountId?: string
 ): Promise<void> {
-  const assetHashes = await downloadAssets(accessToken, document);
+  const repository = repositoryFor(accountId);
+  const assetHashes = await downloadAssets(accessToken, document, false, accountId);
   await repository.save(document);
-  await writeSyncMeta(document.notebook.id, revision, document.notebook.updatedAt, assetHashes, accountId);
+  await writeSyncMeta(
+    document.notebook.id,
+    revision,
+    document.notebook.updatedAt,
+    assetHashes,
+    accountId
+  );
 }
 
 async function uploadChangedAssets(
   accessToken: string,
   document: NotebookDocument,
-  knownHashes: Readonly<Record<string, string>>
+  knownHashes: Readonly<Record<string, string>>,
+  accountId?: string
 ): Promise<Readonly<Record<string, string>>> {
+  const repository = repositoryFor(accountId);
   const next: Record<string, string> = {};
   for (const asset of document.assets) {
     if (knownHashes[asset.id] === asset.hash) {
@@ -462,8 +493,10 @@ async function uploadChangedAssets(
 async function downloadAssets(
   accessToken: string,
   document: NotebookDocument,
-  onlyMissing = false
+  onlyMissing = false,
+  accountId?: string
 ): Promise<Readonly<Record<string, string>>> {
+  const repository = repositoryFor(accountId);
   const hashes: Record<string, string> = {};
   for (const asset of document.assets) {
     if (onlyMissing) {
@@ -509,7 +542,8 @@ function asCloudResponse(
 function cloudResponseFromError(
   error: unknown
 ): { readonly document: NotebookDocument; readonly revision: number } | undefined {
-  if (!(error instanceof ApiError) || !error.payload || typeof error.payload !== "object") return undefined;
+  if (!(error instanceof ApiError) || !error.payload || typeof error.payload !== "object")
+    return undefined;
   const payload = error.payload as Partial<CloudDocumentResponse>;
   return isDocument(payload.document) && validRevision(payload.revision)
     ? { document: payload.document, revision: payload.revision }
@@ -583,7 +617,10 @@ function belongsToActiveAccount(meta: CloudSyncMeta | undefined, accountId?: str
   return !meta?.accountId || !accountId || meta.accountId === accountId;
 }
 
-function deletionTimestamp(item: { readonly payload: unknown; readonly createdAt: number }): number {
+function deletionTimestamp(item: {
+  readonly payload: unknown;
+  readonly createdAt: number;
+}): number {
   if (item.payload && typeof item.payload === "object" && "deletedAt" in item.payload) {
     const deletedAt = (item.payload as { deletedAt?: unknown }).deletedAt;
     if (typeof deletedAt === "number" && Number.isFinite(deletedAt)) return deletedAt;

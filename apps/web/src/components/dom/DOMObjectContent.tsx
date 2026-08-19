@@ -6,16 +6,18 @@ import { NoteTable, Spreadsheet } from "./TableObjects";
 
 export function DOMObjectContent({
   object,
-  onUpdate
+  onUpdate,
+  readOnly = false
 }: {
   readonly object: DOMRenderableObject;
   readonly onUpdate: DOMObjectUpdate;
+  readonly readOnly?: boolean;
 }) {
   switch (object.type) {
     case "text":
-      return <EditableText object={object} onUpdate={onUpdate} />;
+      return <EditableText object={object} onUpdate={onUpdate} readOnly={readOnly} />;
     case "math":
-      return <MathCard object={object} onUpdate={onUpdate} />;
+      return <MathCard object={object} onUpdate={onUpdate} readOnly={readOnly} />;
     case "image":
       return <AssetImage object={object} />;
     case "pdf":
@@ -23,9 +25,9 @@ export function DOMObjectContent({
     case "docx":
       return <article className="docx-object" dangerouslySetInnerHTML={{ __html: object.html }} />;
     case "table":
-      return <NoteTable object={object} onUpdate={onUpdate} />;
+      return <NoteTable object={object} onUpdate={onUpdate} readOnly={readOnly} />;
     case "spreadsheet":
-      return <Spreadsheet object={object} onUpdate={onUpdate} />;
+      return <Spreadsheet object={object} onUpdate={onUpdate} readOnly={readOnly} />;
     case "calculation":
       return (
         <div className="calculation-object">

@@ -53,7 +53,7 @@ export function registerAuthRoutes(context: ApiContext): void {
       if (!credentials) return;
       try {
         const result = await pool.query<StoredUser>(
-          "INSERT INTO users (id, email, password_hash, display_name) VALUES ($1, $2, $3, $4) RETURNING id, email, password_hash, display_name",
+          "INSERT INTO users (id, email, password_hash, display_name) VALUES ($1, $2, $3, $4) RETURNING id, email, password_hash, display_name, session_version",
           [
             crypto.randomUUID(),
             credentials.email,
@@ -78,7 +78,7 @@ export function registerAuthRoutes(context: ApiContext): void {
       try {
         const user = (
           await pool.query<StoredUser>(
-            "SELECT id, email, password_hash, display_name FROM users WHERE email = $1 LIMIT 1",
+            "SELECT id, email, password_hash, display_name, session_version FROM users WHERE email = $1 LIMIT 1",
             [credentials.email]
           )
         ).rows[0];
@@ -97,7 +97,7 @@ export function registerAuthRoutes(context: ApiContext): void {
       try {
         const user = (
           await pool.query<StoredUser>(
-            "SELECT id, email, password_hash, display_name FROM users WHERE id = $1 LIMIT 1",
+            "SELECT id, email, password_hash, display_name, session_version FROM users WHERE id = $1 LIMIT 1",
             [request.user.sub]
           )
         ).rows[0];
@@ -109,6 +109,16 @@ export function registerAuthRoutes(context: ApiContext): void {
       }
     }
   );
+  app.post("/auth/logout", { preHandler: auth }, async (request, reply) => {
+    try {
+      await pool.query("UPDATE users SET session_version = session_version + 1 WHERE id = $1", [
+        request.user.sub
+      ]);
+      return reply.code(204).send();
+    } catch (error) {
+      return databaseFailure(reply, error, app.log.error.bind(app.log));
+    }
+  });
   app.get("/auth/me", { preHandler: auth }, async (request, reply) => {
     try {
       const user = (
@@ -242,7 +252,7 @@ export function registerAuthRoutes(context: ApiContext): void {
         if (email) {
           user = (
             await pool.query<StoredUser>(
-              "SELECT id, email, password_hash, display_name FROM users WHERE email = $1 LIMIT 1",
+              "SELECT id, email, password_hash, display_name, session_version FROM users WHERE email = $1 LIMIT 1",
               [email]
             )
           ).rows[0];
@@ -260,7 +270,7 @@ export function registerAuthRoutes(context: ApiContext): void {
         if (!user && credential) {
           user = (
             await pool.query<StoredUser>(
-              "SELECT id, email, password_hash, display_name FROM users WHERE id = $1 LIMIT 1",
+              "SELECT id, email, password_hash, display_name, session_version FROM users WHERE id = $1 LIMIT 1",
               [credential.user_id]
             )
           ).rows[0];
@@ -491,10 +501,14 @@ export function registerAuthRoutes(context: ApiContext): void {
 }
 
 function issueTokens(context: ApiContext, user: StoredUser) {
+  const sessionVersion = Number(user.session_version ?? 0);
   return {
-    accessToken: context.app.jwt.sign({ sub: user.id, email: user.email }, { expiresIn: "15m" }),
+    accessToken: context.app.jwt.sign(
+      { sub: user.id, email: user.email, sessionVersion },
+      { expiresIn: "15m" }
+    ),
     refreshToken: context.app.jwt.sign(
-      { sub: user.id, email: user.email, type: "refresh" },
+      { sub: user.id, email: user.email, type: "refresh", sessionVersion },
       { expiresIn: "30d" }
     ),
     user: toAccount(user)

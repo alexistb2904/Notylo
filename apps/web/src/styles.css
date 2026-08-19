@@ -629,6 +629,104 @@ input:focus-visible,
   font-weight: 600;
   padding: 8px 12px !important;
 }
+.share-dialog {
+  position: relative;
+}
+.dialog-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--tone-700);
+  padding: 7px;
+  border-radius: 7px;
+}
+.dialog-close:hover {
+  background: var(--tone-200);
+  color: var(--tone-950);
+}
+.share-modes {
+  display: grid;
+  gap: 10px;
+}
+.share-modes label {
+  display: flex;
+  grid-template-columns: none;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 12px;
+  border: 1px solid var(--tone-300);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.share-modes label:has(input:checked) {
+  border-color: var(--tone-700);
+  background: var(--tone-200);
+}
+.share-modes input {
+  width: auto;
+  margin-top: 3px;
+  accent-color: var(--tone-950);
+}
+.share-modes span {
+  display: grid;
+  gap: 4px;
+}
+.share-modes small {
+  color: var(--tone-700);
+  font-weight: 400;
+}
+.share-link-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--tone-700);
+}
+.share-link-box input {
+  min-width: 0;
+  padding: 10px 11px;
+  font-size: 12px;
+}
+.share-link-box .outline-action {
+  flex: 0 0 auto;
+  padding: 9px 11px;
+}
+.public-access-banner {
+  position: fixed;
+  top: 68px;
+  right: 14px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--tone-300);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tone-100) 92%, transparent);
+  color: var(--tone-700);
+  box-shadow: 0 6px 20px var(--tone-shadow);
+  font-size: 11px;
+}
+.public-access-banner a {
+  color: var(--tone-950);
+  font-weight: 700;
+}
+.public-share-progress {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  z-index: 10;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 9px 13px;
+  border-radius: 999px;
+  background: var(--tone-950);
+  color: var(--tone-100);
+  font-size: 12px;
+}
 .editor-main {
   flex: 1;
   display: flex;

@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   display_name TEXT NOT NULL DEFAULT '',
+  session_version BIGINT NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS webauthn_credentials (
@@ -63,6 +64,16 @@ CREATE TABLE IF NOT EXISTS notebook_tombstones (
 );
 CREATE INDEX IF NOT EXISTS notebook_tombstones_owner_deleted_idx
   ON notebook_tombstones (owner_id, deleted_at DESC);
+
+CREATE TABLE IF NOT EXISTS notebook_shares (
+  notebook_id UUID PRIMARY KEY REFERENCES notebooks(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  mode TEXT NOT NULL CHECK (mode IN ('read', 'write')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS notebook_shares_token_hash_idx ON notebook_shares(token_hash);
+
 CREATE TABLE IF NOT EXISTS pending_asset_deletions (
   object_key TEXT PRIMARY KEY,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()

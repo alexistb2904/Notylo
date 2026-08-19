@@ -22,7 +22,7 @@ type AuthState = {
   continueOffline(): void;
   refreshSession(): Promise<boolean>;
   updateUser(user: Account): void;
-  logout(): void;
+  logout(): Promise<void>;
 };
 
 type StoredSession = {
@@ -72,6 +72,12 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     setUser(undefined);
     setHasOfflineAccess(false);
   }, []);
+
+  const logout = useCallback(async () => {
+    const currentAccessToken = accessToken;
+    clear();
+    if (currentAccessToken) await api.logout(currentAccessToken).catch(() => undefined);
+  }, [accessToken, clear]);
 
   const continueOffline = useCallback(() => {
     try {
@@ -200,7 +206,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
       continueOffline,
       refreshSession,
       updateUser,
-      logout: clear
+      logout
     }),
     [
       user,
@@ -215,7 +221,8 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
       continueOffline,
       refreshSession,
       updateUser,
-      clear
+      clear,
+      logout
     ]
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

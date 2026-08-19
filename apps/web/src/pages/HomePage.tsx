@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ChevronRight,
@@ -33,11 +33,10 @@ import {
   type SyncConflict
 } from "../lib/cloud";
 
-const repository = new NotebookRepository();
-
 export function HomePage() {
   const navigate = useNavigate();
   const { user, accessToken, ready, logout } = useAuth();
+  const repository = useMemo(() => new NotebookRepository(user?.id), [user?.id]);
   const [notebooks, setNotebooks] = useState<readonly NotebookSummary[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -59,10 +58,13 @@ export function HomePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const refresh = async () => setNotebooks(await repository.list());
+  const refresh = useCallback(async () => setNotebooks(await repository.list()), [repository]);
   useEffect(() => {
-    void refresh();
-  }, []);
+    void (async () => {
+      if (user) await repository.claimAnonymous(user.id);
+      await refresh();
+    })();
+  }, [refresh, repository, user]);
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "k") return;

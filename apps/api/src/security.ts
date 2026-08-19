@@ -4,6 +4,7 @@ import type { ApiContext } from "./types.js";
 const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const clientIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/;
+const shareTokenPattern = /^[A-Za-z0-9_-]{43}$/;
 
 export function registerSecurityHooks(
   app: ApiContext["app"],
@@ -45,17 +46,26 @@ export async function accessOnly(
       reply.code(401).send({ error: "Session invalide ou expirée." });
       return;
     }
-    const exists = await context.pool.query("SELECT 1 FROM users WHERE id = $1", [
-      request.user.sub
-    ]);
-    if (!exists.rowCount) reply.code(401).send({ error: "La session n’est plus valide." });
+    const current = await context.pool.query<{ session_version: string | number }>(
+      "SELECT session_version FROM users WHERE id = $1",
+      [request.user.sub]
+    );
+    const sessionVersion = Number(request.user.sessionVersion ?? 0);
+    if (
+      !current.rowCount ||
+      !Number.isSafeInteger(sessionVersion) ||
+      sessionVersion !== Number(current.rows[0]!.session_version)
+    ) {
+      reply.code(401).send({ error: "La session n’est plus valide." });
+      return;
+    }
   } catch {
     reply.code(401).send({ error: "Session invalide ou expirée." });
   }
 }
 
 export async function refreshOnly(
-  _context: ApiContext,
+  context: ApiContext,
   request: FastifyRequest,
   reply: FastifyReply
 ): Promise<void> {
@@ -63,6 +73,20 @@ export async function refreshOnly(
     await request.jwtVerify();
     if (request.user.type !== "refresh") {
       reply.code(401).send({ error: "Jeton de renouvellement requis." });
+      return;
+    }
+    const current = await context.pool.query<{ session_version: string | number }>(
+      "SELECT session_version FROM users WHERE id = $1",
+      [request.user.sub]
+    );
+    const sessionVersion = Number(request.user.sessionVersion ?? 0);
+    if (
+      !current.rowCount ||
+      !Number.isSafeInteger(sessionVersion) ||
+      sessionVersion !== Number(current.rows[0]!.session_version)
+    ) {
+      reply.code(401).send({ error: "La session n’est plus valide." });
+      return;
     }
   } catch {
     reply.code(401).send({ error: "Session invalide ou expirée." });
@@ -75,6 +99,10 @@ export function validUuid(value: unknown): value is string {
 
 export function validClientId(value: unknown): value is string {
   return typeof value === "string" && clientIdPattern.test(value);
+}
+
+export function validShareToken(value: unknown): value is string {
+  return typeof value === "string" && shareTokenPattern.test(value);
 }
 
 export function validRevision(value: unknown): value is number {
