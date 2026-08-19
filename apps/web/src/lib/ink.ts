@@ -7,20 +7,20 @@ export type RenderInkPoint = Pick<
 
 /**
  * Capture spacing is expressed in document units. At low zoom we avoid storing
- * multiple browser samples that collapse to the same screen pixel; at high zoom
- * we retain enough detail for pressure/tilt-sensitive handwriting.
+ * browser samples that collapse to the same screen pixel; at high zoom we retain
+ * enough detail for pressure-sensitive handwriting without tying shape quality to DPR.
  */
 export function captureSpacingForZoom(zoom: number, brushSize: number): number {
   const safeZoom = Math.max(0.05, zoom);
-  const screenDriven = 0.2 / safeZoom;
-  const brushDriven = Math.max(0.035, brushSize * 0.015);
-  return Math.max(0.04, Math.min(4, Math.max(screenDriven, brushDriven)));
+  const screenDriven = 0.15 / safeZoom;
+  const brushDriven = Math.max(0.03, brushSize * 0.012);
+  return Math.max(0.035, Math.min(3, Math.max(screenDriven, brushDriven)));
 }
 
 /**
- * Keep meaningful coalesced samples but discard exact browser noise. Geometry
- * smoothing belongs to the ink engine; stored points remain device input so
- * erasing, OCR, sync and future renderers are not locked to one visual filter.
+ * Keep meaningful coalesced samples but discard transport noise. Geometry
+ * smoothing belongs to the stroke engine; stored points stay close to the device
+ * input so erasing, OCR, sync and future renderers are not locked to one filter.
  */
 export function appendInkPoint(
   points: InkPoint[],
@@ -44,62 +44,62 @@ export function appendInkPoint(
 }
 
 /**
- * Causal speed-adaptive low-pass filter inspired by Krita's weighted smoothing:
- * slow motion receives stronger stabilisation, fast handwriting stays responsive.
- * Because each output only depends on past samples, appending a new point never
- * changes already displayed parts of the line.
+ * Sensor-only stabilisation.
+ *
+ * IMPORTANT: x/y are deliberately never low-pass filtered here. perfect-freehand
+ * already owns centre-line streamlining; filtering the position a second time used
+ * to create a delayed point that suddenly caught up when speed/direction changed,
+ * perceived as a snap or teleport on sharp handwriting turns.
+ *
+ * Pressure and tilt are independent noisy tablet sensors, so those channels get a
+ * small time-based low-pass filter. This follows the same separation used by mature
+ * drawing software: trajectory smoothing and sensor smoothing are different jobs.
  */
 export function stabilizeInkPoints(
   points: readonly RenderInkPoint[],
   smoothing: number,
-  brushSize: number
+  _brushSize: number
 ): readonly RenderInkPoint[] {
-  if (points.length < 2 || smoothing <= 0.001) return points;
+  if (points.length < 2) return points;
 
   const amount = clamp01(smoothing);
+  if (amount <= 0.001) return points;
+
   const first = points[0]!;
   const result: RenderInkPoint[] = [{ ...first }];
   let previousRaw = first;
-  let previousFiltered: RenderInkPoint = { ...first };
-  let velocityX = 0;
-  let velocityY = 0;
+  let filteredPressure = clamp01(first.pressure);
+  let filteredTiltX = first.tiltX ?? 0;
+  let filteredTiltY = first.tiltY ?? 0;
 
   for (let index = 1; index < points.length; index++) {
     const raw = points[index]!;
     const dt = sampleDeltaSeconds(previousRaw.timestamp, raw.timestamp);
-    const rawVelocityX = (raw.x - previousRaw.x) / dt;
-    const rawVelocityY = (raw.y - previousRaw.y) / dt;
-    const derivativeAlpha = lowPassAlpha(dt, 1.5);
-    velocityX = lerp(velocityX, rawVelocityX, derivativeAlpha);
-    velocityY = lerp(velocityY, rawVelocityY, derivativeAlpha);
+    const pressureAlpha = lowPassAlpha(dt, lerp(42, 12, amount));
+    const tiltAlpha = lowPassAlpha(dt, lerp(28, 7, amount));
 
-    const normalizedSpeed = Math.hypot(velocityX, velocityY) / Math.max(1, brushSize);
-    const minCutoff = lerp(25, 4.5, amount);
-    const beta = lerp(0.35, 0.16, amount);
-    const positionAlpha = lowPassAlpha(dt, minCutoff + beta * normalizedSpeed);
-    const sensorAlpha = lowPassAlpha(dt, lerp(30, 8, amount) + normalizedSpeed * 0.04);
+    filteredPressure = lerp(filteredPressure, clamp01(raw.pressure), pressureAlpha);
+    filteredTiltX = lerp(filteredTiltX, raw.tiltX ?? 0, tiltAlpha);
+    filteredTiltY = lerp(filteredTiltY, raw.tiltY ?? 0, tiltAlpha);
 
-    const filtered: RenderInkPoint = {
-      x: lerp(previousFiltered.x, raw.x, positionAlpha),
-      y: lerp(previousFiltered.y, raw.y, positionAlpha),
-      pressure: lerp(previousFiltered.pressure, clamp01(raw.pressure), sensorAlpha),
-      tiltX: lerp(previousFiltered.tiltX ?? 0, raw.tiltX ?? 0, sensorAlpha),
-      tiltY: lerp(previousFiltered.tiltY ?? 0, raw.tiltY ?? 0, sensorAlpha),
+    result.push({
+      x: raw.x,
+      y: raw.y,
+      pressure: filteredPressure,
+      tiltX: filteredTiltX,
+      tiltY: filteredTiltY,
       timestamp: raw.timestamp
-    };
-    result.push(filtered);
+    });
     previousRaw = raw;
-    previousFiltered = filtered;
   }
 
   return result;
 }
 
 /**
- * Finalisation must not visibly reshape a stroke after pointer-up. The previous
- * RDP pass could remove centre-line points and therefore change perfect-freehand's
- * spline only after release. We now perform storage-only duplicate cleanup with
- * a tiny epsilon; the visible geometry is effectively identical before/after.
+ * Finalisation must not visibly reshape a stroke after pointer-up. We only remove
+ * exact transport duplicates; perfect-freehand receives essentially the same centre
+ * line live and committed.
  */
 export function compactInkPoints(points: readonly InkPoint[], _tolerance = 0.35): InkPoint[] {
   if (points.length <= 1) return [...points];
@@ -121,8 +121,6 @@ export function compactInkPoints(points: readonly InkPoint[], _tolerance = 0.35)
 
 function sampleDeltaSeconds(previous: number, current: number): number {
   const raw = (current - previous) / 1000;
-  // Date.now() and DOMHighResTimeStamp have different epochs in one older input
-  // path. Treat discontinuities as a 120 Hz sample rather than producing a spike.
   if (!Number.isFinite(raw) || raw <= 0 || raw > 0.05) return 1 / 120;
   return Math.max(1 / 240, Math.min(1 / 30, raw));
 }
