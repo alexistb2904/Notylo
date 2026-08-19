@@ -92,7 +92,7 @@ test("public read-only link is mobile-friendly and pans with one finger", async 
 
   const header = page.locator(".public-editor-header--read");
   await expect(header).toBeVisible();
-  await expect(header.getByText("Lecture seule")).toBeVisible();
+  await expect(header.getByLabel("Lecture seule")).toBeVisible();
   await expect(page.getByLabel("Retour à Notylo")).toBeVisible();
   await expect(page.getByTitle("Ajouter une page")).toHaveCount(0);
   await expect(page.getByRole("navigation", { name: "Outils rapides" })).toHaveCount(0);
@@ -122,7 +122,7 @@ test("stylus-only mode reserves pen for ink and lets one finger pan", async ({ p
 
   const header = page.locator(".public-editor-header--write");
   await expect(header).toBeVisible();
-  await expect(header.getByText("Lecture et écriture")).toBeVisible();
+  await expect(header.getByLabel("Lecture et écriture")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Outils rapides" })).toBeVisible();
 
   const canvas = page.locator(".canvas-area");
