@@ -2,6 +2,7 @@ import type { Worker } from "tesseract.js";
 import type { DocumentObject, ImageObject } from "@notylo/document-model";
 import { NotebookRepository } from "@notylo/persistence";
 import { drawInkToCanvas } from "../components/canvas/inkVector";
+import { t } from "../i18n";
 
 export type OcrMode = "text" | "math";
 
@@ -18,10 +19,6 @@ const MATH_WHITELIST =
 
 let workerPromise: Promise<Worker> | undefined;
 
-/**
- * Runs OCR entirely in the browser. The worker and trained language data are
- * kept in the browser cache so repeated scans do not reload the engine.
- */
 export async function recognizeImage(blob: Blob, mode: OcrMode): Promise<OcrResult> {
   const worker = await getWorker();
   await worker.setParameters({
@@ -35,13 +32,8 @@ export async function recognizeImage(blob: Blob, mode: OcrMode): Promise<OcrResu
 
   try {
     const result = await worker.recognize(blob);
-    return {
-      text: result.data.text.trim(),
-      confidence: Math.round(result.data.confidence)
-    };
+    return { text: result.data.text.trim(), confidence: Math.round(result.data.confidence) };
   } catch (error) {
-    // A failed browser worker can be left in a broken state. Drop it so the
-    // next attempt creates a clean worker instead of reusing a dead session.
     workerPromise = undefined;
     void worker.terminate();
     throw error;
@@ -53,7 +45,7 @@ export async function renderOcrSelection(selected: readonly DocumentObject[]): P
     (object): object is Extract<DocumentObject, { readonly type: "image" | "ink" }> =>
       object.type === "image" || object.type === "ink"
   );
-  if (!objects.length) throw new Error("Sélectionnez une image ou une écriture manuscrite.");
+  if (!objects.length) throw new Error(t("ocr.selectSource"));
 
   const bounds = objects.reduce(
     (current, object) => ({
@@ -71,20 +63,15 @@ export async function renderOcrSelection(selected: readonly DocumentObject[]): P
   canvas.width = Math.max(1, Math.ceil((logicalWidth + OCR_PADDING * 2) * scale));
   canvas.height = Math.max(1, Math.ceil((logicalHeight + OCR_PADDING * 2) * scale));
   const context = canvas.getContext("2d");
-  if (!context) throw new Error("Le navigateur ne peut pas préparer l’image pour l’OCR.");
+  if (!context) throw new Error(t("ocr.browserCannotPrepare"));
 
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.scale(scale, scale);
-  const offset = {
-    x: OCR_PADDING - bounds.left,
-    y: OCR_PADDING - bounds.top
-  };
+  const offset = { x: OCR_PADDING - bounds.left, y: OCR_PADDING - bounds.top };
 
   for (const object of objects) {
     if (object.type === "ink") {
-      // OCR rasterisation deliberately uses the same vector outline as the editor,
-      // so a selected handwritten expression is recognized from what the user saw.
       drawInkToCanvas(context, object, offset);
       continue;
     }
@@ -93,7 +80,7 @@ export async function renderOcrSelection(selected: readonly DocumentObject[]): P
 
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error("Impossible d’encoder l’image OCR."))),
+      (blob) => (blob ? resolve(blob) : reject(new Error(t("ocr.encodeFailed")))),
       "image/png"
     );
   });
@@ -114,7 +101,6 @@ export function mathOcrToLatex(text: string): string {
     .replace(/[\r\n]+/g, " ")
     .replace(/\s{2,}/g, " ")
     .trim();
-
   const fraction = latex.match(/^([^\s]+)\s+\/\s+([^\s]+)$/);
   if (fraction) latex = `\\frac{${fraction[1]}}{${fraction[2]}}`;
   return latex;
@@ -123,11 +109,7 @@ export function mathOcrToLatex(text: string): string {
 async function getWorker(): Promise<Worker> {
   if (!workerPromise) {
     workerPromise = import("tesseract.js")
-      .then(({ createWorker }) =>
-        createWorker("fra+eng", 1, {
-          logger: () => undefined
-        })
-      )
+      .then(({ createWorker }) => createWorker("fra+eng", 1, { logger: () => undefined }))
       .catch((error) => {
         workerPromise = undefined;
         throw error;
@@ -143,7 +125,6 @@ async function drawImageObject(
 ): Promise<void> {
   const asset = await repository.getAsset(object.assetId);
   if (!asset) return;
-
   const bitmap = await decodeImage(asset.blob);
   context.drawImage(bitmap, object.x + offset.x, object.y + offset.y, object.width, object.height);
   bitmap.close?.();

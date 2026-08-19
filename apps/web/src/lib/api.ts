@@ -1,3 +1,5 @@
+import { intlLocale, localizeRemoteError, t } from "../i18n";
+
 const API_URL = (import.meta.env.VITE_API_URL ?? "http://localhost:3001").replace(/\/$/, "");
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -46,6 +48,7 @@ async function request<T>(
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   const headers = new Headers(init.headers);
   if (!headers.has("Accept")) headers.set("Accept", "application/json");
+  if (!headers.has("Accept-Language")) headers.set("Accept-Language", intlLocale);
 
   const abortFromCaller = () => controller.abort();
   if (init.signal) {
@@ -61,10 +64,7 @@ async function request<T>(
       signal: controller.signal
     });
   } catch {
-    throw new ApiError(
-      0,
-      "Le service cloud est indisponible. Vos cahiers locaux restent accessibles."
-    );
+    throw new ApiError(0, t("api.cloudUnavailable"));
   } finally {
     window.clearTimeout(timeout);
     init.signal?.removeEventListener("abort", abortFromCaller);
@@ -72,13 +72,15 @@ async function request<T>(
 
   const payload = (await response.json().catch(() => ({}))) as { error?: string } & T;
   if (!response.ok)
-    throw new ApiError(response.status, payload.error ?? "Une erreur est survenue.", payload);
+    throw new ApiError(response.status, localizeRemoteError(payload.error), payload);
   return payload;
 }
 
 async function requestBlob(path: string, init: RequestInit = {}): Promise<Blob> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const headers = new Headers(init.headers);
+  if (!headers.has("Accept-Language")) headers.set("Accept-Language", intlLocale);
   const abortFromCaller = () => controller.abort();
   if (init.signal) {
     if (init.signal.aborted) controller.abort();
@@ -88,20 +90,21 @@ async function requestBlob(path: string, init: RequestInit = {}): Promise<Blob> 
   try {
     const response = await fetch(`${API_URL}${path}`, {
       ...init,
+      headers,
       signal: controller.signal
     });
     if (!response.ok) {
       const payload = (await response.json().catch(() => ({}))) as { error?: string };
       throw new ApiError(
         response.status,
-        payload.error ?? "Impossible de récupérer une pièce jointe cloud.",
+        localizeRemoteError(payload.error, "api.attachmentUnavailable"),
         payload
       );
     }
     return await response.blob();
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    throw new ApiError(0, "Le stockage cloud est indisponible. La copie locale reste accessible.");
+    throw new ApiError(0, t("api.storageUnavailable"));
   } finally {
     window.clearTimeout(timeout);
     init.signal?.removeEventListener("abort", abortFromCaller);

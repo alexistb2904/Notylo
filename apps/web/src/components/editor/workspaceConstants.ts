@@ -1,5 +1,6 @@
 import { Circle, RectangleHorizontal, Square, Triangle, Waypoints } from "lucide-react";
 import type { ShapeObject } from "@notylo/document-model";
+import { t } from "../../i18n";
 
 export const DEFAULT_COLORS = ["#292927", "#2764d9", "#d4433d", "#258a57", "#d1a510"];
 
@@ -11,8 +12,8 @@ export const DEFAULT_COLORS = ["#292927", "#2764d9", "#d4433d", "#258a57", "#d1a
 export const BRUSHES = [
   {
     id: "ink-fineliner",
-    name: "Stylo",
-    detail: "Net · précis · opaque",
+    name: t("brush.pen"),
+    detail: t("brush.penDetail"),
     size: 2.4,
     tool: "pen" as const,
     smoothing: 0.46,
@@ -20,8 +21,8 @@ export const BRUSHES = [
   },
   {
     id: "pencil-sketch",
-    name: "Crayon",
-    detail: "Graphite · texturé · sensible à la pression",
+    name: t("brush.pencil"),
+    detail: t("brush.pencilDetail"),
     size: 3.2,
     tool: "pencil" as const,
     smoothing: 0.34,
@@ -29,8 +30,8 @@ export const BRUSHES = [
   },
   {
     id: "highlighter-flat",
-    name: "Surligneur",
-    detail: "Large · translucide · superposable",
+    name: t("brush.highlighter"),
+    detail: t("brush.highlighterDetail"),
     size: 4.5,
     tool: "highlighter" as const,
     smoothing: 0.4,
@@ -41,11 +42,11 @@ export const BRUSHES = [
 export type BrushPreset = (typeof BRUSHES)[number];
 
 export const ICONS = [
-  { shape: "square", label: "Carré", icon: Square, width: 120, height: 120 },
-  { shape: "rectangle", label: "Rectangle", icon: RectangleHorizontal, width: 180, height: 112 },
-  { shape: "circle", label: "Cercle parfait", icon: Circle, width: 128, height: 128 },
-  { shape: "triangle", label: "Triangle", icon: Triangle, width: 150, height: 130 },
-  { shape: "poly-arrow", label: "Flèche modulable", icon: Waypoints, width: 240, height: 140 }
+  { shape: "square", label: t("icon.square"), icon: Square, width: 120, height: 120 },
+  { shape: "rectangle", label: t("icon.rectangle"), icon: RectangleHorizontal, width: 180, height: 112 },
+  { shape: "circle", label: t("icon.circle"), icon: Circle, width: 128, height: 128 },
+  { shape: "triangle", label: t("icon.triangle"), icon: Triangle, width: 150, height: 130 },
+  { shape: "poly-arrow", label: t("icon.arrow"), icon: Waypoints, width: 240, height: 140 }
 ] as const satisfies readonly {
   readonly shape: ShapeObject["shape"];
   readonly label: string;

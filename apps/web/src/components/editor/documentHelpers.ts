@@ -3,6 +3,7 @@ import type { DocumentObject, NotebookDocument } from "@notylo/document-model";
 import { NotebookRepository } from "@notylo/persistence";
 import { newMath, newText } from "../../lib/factories";
 import { mathOcrToLatex, recognizeImage, renderOcrSelection, type OcrMode } from "../../lib/ocr";
+import { t } from "../../i18n";
 
 const repository = new NotebookRepository();
 
@@ -40,11 +41,11 @@ async function recognizeSelectedInternal(
   mode: OcrMode
 ): Promise<number> {
   const source = selected.find((object) => object.type === "image" || object.type === "ink");
-  if (!source) throw new Error("Sélectionnez une image ou une écriture manuscrite.");
+  if (!source) throw new Error(t("ocr.selectSource"));
 
   const result = await recognizeImage(await renderOcrSelection(selected), mode);
   const recognized = mode === "math" ? mathOcrToLatex(result.text) : result.text;
-  if (!recognized) throw new Error("Aucun texte lisible n’a été trouvé dans la sélection.");
+  if (!recognized) throw new Error(t("ocr.noText"));
 
   const base = {
     notebookId: source.notebookId,
@@ -55,10 +56,6 @@ async function recognizeSelectedInternal(
     height: mode === "math" ? 86 : 120,
     zIndex: Math.max(...selected.map((object) => object.zIndex), 0) + 1
   };
-  add(
-    mode === "math"
-      ? newMath({ ...base, latex: recognized })
-      : newText({ ...base, text: recognized })
-  );
+  add(mode === "math" ? newMath({ ...base, latex: recognized }) : newText({ ...base, text: recognized }));
   return result.confidence;
 }

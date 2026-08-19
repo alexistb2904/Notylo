@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { authErrorMessage, isCloudUnavailable, useAuth } from "../lib/auth";
+import { t } from "../i18n";
 
 export function AuthDialog({ onClose, required = false }: { onClose(): void; required?: boolean }) {
   const {
@@ -63,18 +64,20 @@ export function AuthDialog({ onClose, required = false }: { onClose(): void; req
         }}
       >
         <div className="dialog-title">
-          <p className="eyebrow">Compte Notylo</p>
-          <h2 id="auth-dialog-title">{createAccount ? "Créer un compte" : "Se connecter"}</h2>
+          <p className="eyebrow">{t("auth.account")}</p>
+          <h2 id="auth-dialog-title">
+            {createAccount ? t("auth.createAccount") : t("auth.signIn")}
+          </h2>
           <p className="auth-intro">
             {cloudUnavailable
-              ? "Le cloud est indisponible pour le moment. Vos cahiers locaux restent accessibles."
+              ? t("auth.cloudUnavailable")
               : required
-                ? "Un compte autorisé est nécessaire pour accéder à cet espace."
-                : "Vos cahiers restent sur cet appareil. Le compte prépare l’accès aux services privés."}
+                ? t("auth.requiredIntro")
+                : t("auth.optionalIntro")}
           </p>
         </div>
         <label>
-          Adresse e-mail
+          {t("auth.email")}
           <input
             autoFocus
             autoComplete="email"
@@ -84,14 +87,10 @@ export function AuthDialog({ onClose, required = false }: { onClose(): void; req
             onChange={(event) => setEmail(event.target.value)}
             required
           />
-          {!createAccount && (
-            <small className="field-hint">
-              Facultative avec une passkey : laissez vide pour choisir un appareil enregistré.
-            </small>
-          )}
+          {!createAccount && <small className="field-hint">{t("auth.passkeyHint")}</small>}
         </label>
         <label>
-          Mot de passe
+          {t("auth.password")}
           <input
             autoComplete={createAccount ? "new-password" : "current-password"}
             minLength={10}
@@ -100,7 +99,7 @@ export function AuthDialog({ onClose, required = false }: { onClose(): void; req
             onChange={(event) => setPassword(event.target.value)}
             required
           />
-          {createAccount && <small className="field-hint">10 caractères minimum.</small>}
+          {createAccount && <small className="field-hint">{t("auth.passwordMinimum")}</small>}
         </label>
         {error && (
           <p className="auth-error" role="alert">
@@ -117,11 +116,15 @@ export function AuthDialog({ onClose, required = false }: { onClose(): void; req
                 setError(undefined);
               }}
             >
-              {createAccount ? "J’ai déjà un compte" : "Créer un compte"}
+              {createAccount ? t("auth.haveAccount") : t("auth.createAccount")}
             </button>
           )}
           <button className="primary-action" disabled={pending} type="submit">
-            {pending ? "Connexion…" : createAccount ? "Créer le compte" : "Se connecter"}
+            {pending
+              ? t("auth.connecting")
+              : createAccount
+                ? t("auth.createAccountAction")
+                : t("auth.signIn")}
           </button>
         </div>
         {required && cloudUnavailable && (
@@ -130,7 +133,7 @@ export function AuthDialog({ onClose, required = false }: { onClose(): void; req
             type="button"
             onClick={continueOffline}
           >
-            Continuer hors connexion
+            {t("auth.continueOffline")}
           </button>
         )}
         {!createAccount && window.PublicKeyCredential && (
@@ -140,12 +143,12 @@ export function AuthDialog({ onClose, required = false }: { onClose(): void; req
             type="button"
             onClick={() => void signInWithPasskey()}
           >
-            {pending ? "Vérification…" : "Se connecter avec une passkey"}
+            {pending ? t("auth.verifying") : t("auth.signInPasskey")}
           </button>
         )}
         {!required && (
           <button className="text-button menu-close" type="button" onClick={onClose}>
-            Continuer sans compte
+            {t("auth.continueWithoutAccount")}
           </button>
         )}
       </form>

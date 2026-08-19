@@ -8,6 +8,7 @@ import {
   type ReactNode
 } from "react";
 import { api, ApiError, type Account, type AuthResponse } from "./api";
+import { t } from "../i18n";
 
 type AuthState = {
   readonly user: Account | undefined;
@@ -175,8 +176,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   );
   const loginWithPasskey = useCallback(
     async (email?: string) => {
-      if (!window.PublicKeyCredential)
-        throw new Error("Les passkeys ne sont pas prises en charge par ce navigateur.");
+      if (!window.PublicKeyCredential) throw new Error(t("auth.passkeysUnsupported"));
       const { startAuthentication } = await import("@simplewebauthn/browser");
       const normalizedEmail = email?.trim().toLowerCase() || undefined;
       const options = await api.passkeyLoginOptions(normalizedEmail);
@@ -221,7 +221,6 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
       continueOffline,
       refreshSession,
       updateUser,
-      clear,
       logout
     ]
   );
@@ -237,8 +236,8 @@ export function useAuth(): AuthState {
 export function authErrorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   if (error instanceof DOMException && error.name === "NotAllowedError")
-    return "La passkey a été annulée ou refusée.";
-  return "La connexion a échoué. Réessayez dans un instant.";
+    return t("auth.passkeyCancelled");
+  return t("auth.loginFailed");
 }
 
 function readStoredSession(): StoredSession | undefined {

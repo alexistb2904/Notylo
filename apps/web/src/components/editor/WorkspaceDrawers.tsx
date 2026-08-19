@@ -11,6 +11,7 @@ import { GripVertical } from "lucide-react";
 import type { Tool } from "./types";
 import { BRUSHES, ICONS, type BrushPreset, type IconShape } from "./workspaceConstants";
 import { readStoredPoint } from "./preferences";
+import { t } from "../../i18n";
 
 interface Props {
   readonly tool: Tool;
@@ -155,14 +156,14 @@ export function WorkspaceDrawers({
             } as CSSProperties
           }
           role="toolbar"
-          aria-label="Palette de dessin"
+          aria-label={t("drawer.palette")}
           onPointerDown={(event) => event.stopPropagation()}
         >
           <button
             className="palette-grip"
             type="button"
-            aria-label="Déplacer la palette"
-            title="Déplacer la palette"
+            aria-label={t("drawer.movePalette")}
+            title={t("drawer.movePalette")}
             onPointerDown={onPaletteGripDown}
             onPointerMove={onPaletteGripMove}
             onPointerUp={onPaletteGripUp}
@@ -181,7 +182,7 @@ export function WorkspaceDrawers({
                   if (input?.showPicker) input.showPicker();
                   else input?.click();
                 }}
-                aria-label={`Couleur ${index + 1}. Double-cliquez pour la modifier.`}
+                aria-label={t("drawer.colorEdit", { index: index + 1 })}
                 aria-pressed={index === paletteIndex}
               />
               <input
@@ -189,7 +190,7 @@ export function WorkspaceDrawers({
                   paletteInputRefs.current[index] = element;
                 }}
                 tabIndex={-1}
-                aria-label={`Modifier la couleur ${index + 1}`}
+                aria-label={t("drawer.editColor", { index: index + 1 })}
                 type="color"
                 value={color}
                 onChange={(event) => onPaletteColor(event.target.value, index)}
@@ -202,20 +203,20 @@ export function WorkspaceDrawers({
         <div
           className="brush-drawer"
           role="dialog"
-          aria-label="Brosses et épaisseurs"
+          aria-label={t("drawer.brushesAndSizes")}
           onPointerDown={(event) => event.stopPropagation()}
         >
           <div>
-            <strong>Brosses</strong>
-            <button onClick={onCloseBrushes} aria-label="Fermer">
+            <strong>{t("tools.brushes")}</strong>
+            <button onClick={onCloseBrushes} aria-label={t("common.close")}>
               ×
             </button>
           </div>
-          <p>Choisissez une sensation de trait.</p>
+          <p>{t("drawer.chooseStroke")}</p>
           <div className="brush-grid">
             {BRUSHES.map((brush) => (
               <button
-                key={brush.name}
+                key={brush.id}
                 aria-pressed={brushId === brush.id}
                 onClick={() => onBrush(brush)}
               >
@@ -237,16 +238,16 @@ export function WorkspaceDrawers({
         <div
           className="icon-drawer"
           role="dialog"
-          aria-label="Icônes de base"
+          aria-label={t("tools.basicIcons")}
           onPointerDown={(event) => event.stopPropagation()}
         >
           <div>
-            <strong>Icônes</strong>
-            <button onClick={onCloseIcons} aria-label="Fermer">
+            <strong>{t("tools.icons")}</strong>
+            <button onClick={onCloseIcons} aria-label={t("common.close")}>
               ×
             </button>
           </div>
-          <p>Choisissez une forme, puis glissez du point A au point B.</p>
+          <p>{t("drawer.chooseShape")}</p>
           <div className="icon-grid">
             {ICONS.map((item) => {
               const Icon = item.icon;

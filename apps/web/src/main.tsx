@@ -7,6 +7,9 @@ import "./mobile-editor.css";
 import "./public-editor.css";
 import { App } from "./App";
 import { AuthProvider } from "./lib/auth";
+import { applyDocumentLocale } from "./i18n";
+
+applyDocumentLocale();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

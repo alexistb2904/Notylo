@@ -81,6 +81,7 @@ import {
   readStoredPalette,
   readStoredSidebar
 } from "./editor/preferences";
+import { t } from "../i18n";
 import type {
   DraftInk,
   DragState,
@@ -391,7 +392,7 @@ export function EditorWorkspace(props: Props) {
             kind: "update-objects",
             before: result.before,
             after: result.after,
-            label: "Aperçu gomme"
+            label: t("ops.eraserPreview")
           })
         : gesture.baseDocument
     );
@@ -405,7 +406,7 @@ export function EditorWorkspace(props: Props) {
     props.onUpdate(
       result.before,
       result.after,
-      eraserMode === "object" ? "Effacer des objets" : "Gommer le trait"
+      eraserMode === "object" ? t("ops.eraseObjects") : t("ops.eraseStroke")
     );
   };
 
@@ -780,7 +781,7 @@ export function EditorWorkspace(props: Props) {
                 props.onUpdate(
                   [ink],
                   [{ ...shape, id: ink.id, createdAt: ink.createdAt }],
-                  "Ajuster une forme"
+                  t("ops.adjustShape")
                 );
             }, 2000);
           }
@@ -823,7 +824,7 @@ export function EditorWorkspace(props: Props) {
           state.originals.map((object) =>
             keepInsidePage(transformObject(object, { dx: offset.x, dy: offset.y }))
           ),
-          "Déplacer la sélection"
+          t("ops.moveSelection")
         );
       resetDragOffset();
     }
@@ -838,7 +839,7 @@ export function EditorWorkspace(props: Props) {
       props.onUpdate(
         state.originals,
         state.originals.map((object) => keepInsidePage(transformObject(object, transform))),
-        "Redimensionner la sélection"
+        t("ops.resizeSelection")
       );
       resizePointRef.current = undefined;
     }
@@ -861,7 +862,7 @@ export function EditorWorkspace(props: Props) {
         props.onUpdate(
           [state.arrow],
           [{ ...state.arrow, points, updatedAt: Date.now() }],
-          "Modifier le tracé de la flèche"
+          t("ops.editArrow")
         );
       resizePointRef.current = undefined;
     }
@@ -976,7 +977,7 @@ export function EditorWorkspace(props: Props) {
           });
         } else if (/\.(xlsx|xls|csv)$/i.test(file.name)) {
           const workbook = XLSX.read(await file.arrayBuffer());
-          const sheetName = workbook.SheetNames[0] ?? "Feuille 1";
+          const sheetName = workbook.SheetNames[0] ?? t("factory.sheet1");
           const sheet = workbook.Sheets[sheetName];
           const rows = sheet
             ? XLSX.utils.sheet_to_json<(string | number)[]>(sheet, { header: 1 })
@@ -1154,22 +1155,22 @@ export function EditorWorkspace(props: Props) {
   const updateObject = (
     before: DocumentObject,
     after: DocumentObject,
-    label = "Modifier l’objet"
+    label = t("ops.editObject")
   ) => props.onUpdate([before], [after], label);
   const selectedObjects = scopedObjects.filter((object) => selectedIds.includes(object.id));
   const runOcr = async (mode: OcrMode) => {
     if (ocrBusy) return;
     setOcrBusy(true);
-    setOcrStatus(mode === "math" ? "Préparation de la formule…" : "Préparation du texte…");
+    setOcrStatus(mode === "math" ? t("ocr.preparingFormula") : t("ocr.preparingText"));
     try {
       const confidence = await recognizeSelected(selectedObjects, props.onAdd, mode);
       setOcrStatus(
         mode === "math"
-          ? `Formule ajoutée — confiance estimée à ${confidence} %.`
-          : `Texte ajouté — confiance estimée à ${confidence} %.`
+          ? t("ocr.formulaAdded", { confidence })
+          : t("ocr.textAdded", { confidence })
       );
     } catch (error) {
-      setOcrStatus(error instanceof Error ? error.message : "La reconnaissance a échoué.");
+      setOcrStatus(error instanceof Error ? error.message : t("ocr.failed"));
     } finally {
       setOcrBusy(false);
     }
