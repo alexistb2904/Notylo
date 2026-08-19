@@ -51,10 +51,10 @@ CREATE TABLE IF NOT EXISTS assets (
   mime_type TEXT NOT NULL,
   size BIGINT NOT NULL,
   object_key TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (notebook_id, hash)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS assets_notebook_client_id_key ON assets (notebook_id, client_id);
+CREATE INDEX IF NOT EXISTS assets_notebook_hash_idx ON assets (notebook_id, hash);
 CREATE TABLE IF NOT EXISTS notebook_tombstones (
   id UUID PRIMARY KEY,
   owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
