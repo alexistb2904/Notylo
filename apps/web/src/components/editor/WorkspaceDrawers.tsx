@@ -1,6 +1,15 @@
-import type { CSSProperties, MutableRefObject } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MutableRefObject,
+  type PointerEvent
+} from "react";
+import { GripVertical } from "lucide-react";
 import type { Tool } from "./types";
 import { BRUSHES, ICONS, type BrushPreset, type IconShape } from "./workspaceConstants";
+import { readStoredPoint } from "./preferences";
 
 interface Props {
   readonly tool: Tool;
@@ -37,15 +46,66 @@ export function WorkspaceDrawers({
   onCloseIcons,
   onIcon
 }: Props) {
+  const [palettePosition, setPalettePosition] = useState(() =>
+    readStoredPoint("notylo-floating-palette-position", { x: 18, y: 18 })
+  );
+  const paletteDrag = useRef<
+    { pointerId: number; startX: number; startY: number; x: number; y: number } | undefined
+  >(undefined);
+
+  useEffect(() => {
+    localStorage.setItem("notylo-floating-palette-position", JSON.stringify(palettePosition));
+  }, [palettePosition]);
+
+  const onPaletteGripDown = (event: PointerEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    paletteDrag.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      x: palettePosition.x,
+      y: palettePosition.y
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const onPaletteGripMove = (event: PointerEvent<HTMLButtonElement>) => {
+    const drag = paletteDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.stopPropagation();
+    setPalettePosition({
+      x: Math.max(8, drag.x + event.clientX - drag.startX),
+      y: Math.max(8, drag.y + event.clientY - drag.startY)
+    });
+  };
+  const onPaletteGripUp = (event: PointerEvent<HTMLButtonElement>) => {
+    if (paletteDrag.current?.pointerId !== event.pointerId) return;
+    paletteDrag.current = undefined;
+    if (event.currentTarget.hasPointerCapture(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
   return (
     <>
       {(tool === "pen" || tool === "pencil" || tool === "highlighter") && paletteVisible && (
         <div
           className="floating-palette"
+          style={{ left: palettePosition.x, top: palettePosition.y }}
           role="toolbar"
           aria-label="Palette de dessin"
           onPointerDown={(event) => event.stopPropagation()}
         >
+          <button
+            className="palette-grip"
+            type="button"
+            aria-label="Déplacer la palette"
+            title="Déplacer la palette"
+            onPointerDown={onPaletteGripDown}
+            onPointerMove={onPaletteGripMove}
+            onPointerUp={onPaletteGripUp}
+            onPointerCancel={onPaletteGripUp}
+          >
+            <GripVertical size={15} />
+          </button>
           {palette.map((color, index) => (
             <span className="palette-swatch" key={`${color}-${index}`}>
               <button

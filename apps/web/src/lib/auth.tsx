@@ -13,10 +13,13 @@ type AuthState = {
   readonly user: Account | undefined;
   readonly accessToken: string | undefined;
   readonly ready: boolean;
+  readonly hasOfflineAccess: boolean;
   readonly registrationEnabled: boolean;
+  readonly cloudUnavailable: boolean;
   login(email: string, password: string): Promise<void>;
   register(email: string, password: string): Promise<void>;
   loginWithPasskey(email: string): Promise<void>;
+  continueOffline(): void;
   refreshSession(): Promise<boolean>;
   updateUser(user: Account): void;
   logout(): void;
@@ -29,6 +32,7 @@ type StoredSession = {
 };
 
 const storageKey = "notylo-auth";
+const offlineAccessKey = "notylo-offline-access";
 const refreshIntervalMs = 10 * 60 * 1000;
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
@@ -36,7 +40,9 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   const [user, setUser] = useState<Account>();
   const [accessToken, setAccessToken] = useState<string>();
   const [ready, setReady] = useState(false);
+  const [hasOfflineAccess, setHasOfflineAccess] = useState(readOfflineAccess);
   const [registrationEnabled, setRegistrationEnabled] = useState(false);
+  const [cloudUnavailable, setCloudUnavailable] = useState(false);
 
   const store = useCallback((result: AuthResponse) => {
     const session: StoredSession = {
@@ -45,14 +51,35 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
       user: result.user
     };
     sessionStorage.setItem(storageKey, JSON.stringify(session));
+    try {
+      localStorage.setItem(offlineAccessKey, "1");
+    } catch {
+      // A privacy-restricted browser can still use the current session online.
+    }
     setAccessToken(result.accessToken);
     setUser(result.user);
+    setHasOfflineAccess(true);
   }, []);
 
   const clear = useCallback(() => {
     sessionStorage.removeItem(storageKey);
+    try {
+      localStorage.removeItem(offlineAccessKey);
+    } catch {
+      // The current session is still cleared when persistent storage is unavailable.
+    }
     setAccessToken(undefined);
     setUser(undefined);
+    setHasOfflineAccess(false);
+  }, []);
+
+  const continueOffline = useCallback(() => {
+    try {
+      localStorage.setItem(offlineAccessKey, "1");
+    } catch {
+      // The current tab can still continue when persistent storage is unavailable.
+    }
+    setHasOfflineAccess(true);
   }, []);
 
   const refreshSession = useCallback(async (): Promise<boolean> => {
@@ -73,9 +100,14 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     void api
       .authConfig()
       .then((config) => {
-        if (active) setRegistrationEnabled(config.registrationEnabled);
+        if (active) {
+          setRegistrationEnabled(config.registrationEnabled);
+          setCloudUnavailable(false);
+        }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (active) setCloudUnavailable(true);
+      });
 
     const saved = readStoredSession();
     if (saved?.user) {
@@ -112,11 +144,27 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   }, [ready, refreshSession]);
 
   const login = useCallback(
-    async (email: string, password: string) => store(await api.login(email, password)),
+    async (email: string, password: string) => {
+      try {
+        store(await api.login(email, password));
+        setCloudUnavailable(false);
+      } catch (error) {
+        if (isCloudUnavailable(error)) setCloudUnavailable(true);
+        throw error;
+      }
+    },
     [store]
   );
   const register = useCallback(
-    async (email: string, password: string) => store(await api.register(email, password)),
+    async (email: string, password: string) => {
+      try {
+        store(await api.register(email, password));
+        setCloudUnavailable(false);
+      } catch (error) {
+        if (isCloudUnavailable(error)) setCloudUnavailable(true);
+        throw error;
+      }
+    },
     [store]
   );
   const loginWithPasskey = useCallback(
@@ -133,8 +181,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   const updateUser = useCallback((nextUser: Account) => {
     setUser(nextUser);
     const stored = readStoredSession();
-    if (stored)
-      sessionStorage.setItem(storageKey, JSON.stringify({ ...stored, user: nextUser }));
+    if (stored) sessionStorage.setItem(storageKey, JSON.stringify({ ...stored, user: nextUser }));
   }, []);
 
   const value = useMemo(
@@ -142,10 +189,13 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
       user,
       accessToken,
       ready,
+      hasOfflineAccess,
       registrationEnabled,
+      cloudUnavailable,
       login,
       register,
       loginWithPasskey,
+      continueOffline,
       refreshSession,
       updateUser,
       logout: clear
@@ -154,10 +204,13 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
       user,
       accessToken,
       ready,
+      hasOfflineAccess,
       registrationEnabled,
+      cloudUnavailable,
       login,
       register,
       loginWithPasskey,
+      continueOffline,
       refreshSession,
       updateUser,
       clear
@@ -181,9 +234,9 @@ export function authErrorMessage(error: unknown): string {
 
 function readStoredSession(): StoredSession | undefined {
   try {
-    const value = JSON.parse(sessionStorage.getItem(storageKey) ?? "null") as
-      | Partial<StoredSession>
-      | null;
+    const value = JSON.parse(
+      sessionStorage.getItem(storageKey) ?? "null"
+    ) as Partial<StoredSession> | null;
     if (typeof value?.accessToken !== "string" || typeof value.refreshToken !== "string")
       return undefined;
 
@@ -203,5 +256,22 @@ function readStoredSession(): StoredSession | undefined {
   } catch {
     sessionStorage.removeItem(storageKey);
     return undefined;
+  }
+}
+
+export function isCloudUnavailable(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.status === 0 ||
+      error.status >= 500 ||
+      (error.status === 403 && error.message.toLowerCase().includes("intersite")))
+  );
+}
+
+function readOfflineAccess(): boolean {
+  try {
+    return localStorage.getItem(offlineAccessKey) === "1";
+  } catch {
+    return false;
   }
 }

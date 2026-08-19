@@ -52,6 +52,7 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         VITE_API_URL: /api
+        VITE_REQUIRE_AUTH: ${VITE_REQUIRE_AUTH:-true}
     restart: unless-stopped
     expose:
       - "80"

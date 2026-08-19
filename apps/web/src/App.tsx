@@ -4,16 +4,54 @@ import { HomePage } from "./pages/HomePage";
 import { PenDebugPage } from "./pages/PenDebugPage";
 import { BenchmarkPage } from "./pages/BenchmarkPage";
 import { ProfilePage } from "./pages/ProfilePage";
+import { AuthDialog } from "./components/AuthDialog";
+import { useAuth } from "./lib/auth";
+
+const authRequired = ["true", "1", "yes"].includes(
+  String(import.meta.env.VITE_REQUIRE_AUTH).toLowerCase()
+);
 
 export function App() {
   return (
-    <Routes>
-      <Route path="/" element={<HomePage />} />
-      <Route path="/notebook/:id" element={<EditorPage />} />
-      <Route path="/debug/pen" element={<PenDebugPage />} />
-      <Route path="/debug/benchmark" element={<BenchmarkPage />} />
-      <Route path="/profile" element={<ProfilePage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <AccessGate>
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/notebook/:id" element={<EditorPage />} />
+        <Route path="/debug/pen" element={<PenDebugPage />} />
+        <Route path="/debug/benchmark" element={<BenchmarkPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </AccessGate>
+  );
+}
+
+function AccessGate({ children }: { readonly children: React.ReactNode }) {
+  const { ready, user, hasOfflineAccess } = useAuth();
+
+  if (!authRequired || !ready) {
+    if (!ready) {
+      return (
+        <main className="loading-state" aria-live="polite">
+          <span className="brand-mark">P</span>
+          <p>Vérification de l’accès…</p>
+        </main>
+      );
+    }
+    return children;
+  }
+
+  if (user || hasOfflineAccess) return children;
+
+  return (
+    <main className="access-gate">
+      <div className="access-gate-intro">
+        <span className="brand-mark">P</span>
+        <p className="eyebrow">Espace privé</p>
+        <h1>Connexion requise</h1>
+        <p>Connectez-vous pour ouvrir l’espace de travail et utiliser ses ressources.</p>
+      </div>
+      <AuthDialog required onClose={() => undefined} />
+    </main>
   );
 }

@@ -152,6 +152,10 @@ export function EditorWorkspace(props: Props) {
   const [lasso, setLasso] = useState<readonly Point[]>([]);
   const [dragOffset, setDragOffset] = useState<Point>({ x: 0, y: 0 });
   const [showInspector, setShowInspector] = useState(false);
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+  const [stylusOnly, setStylusOnly] = useState(() =>
+    readStoredBoolean("notylo-stylus-only", false)
+  );
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrStatus, setOcrStatus] = useState<string>();
   const [showExport, setShowExport] = useState(false);
@@ -165,7 +169,9 @@ export function EditorWorkspace(props: Props) {
   const internalClipboard = useRef<readonly DocumentObject[]>([]);
   const paletteInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const touchPointers = useRef(new Map<number, Point>());
-  const pinch = useRef<{ distance: number; zoom: number; center: Point } | undefined>(undefined);
+  const pinch = useRef<
+    { distance: number; zoom: number; center: Point; camera: Camera } | undefined
+  >(undefined);
   const activePage = document.pages.find((page) => page.id === currentPageId) ?? document.pages[0];
   const pageGap = document.notebook.settings.pageGap ?? 48;
   const pageOffsets = useMemo(
@@ -220,6 +226,7 @@ export function EditorWorkspace(props: Props) {
     () => localStorage.setItem("notylo-sidebar-position", sidebarPosition),
     [sidebarPosition]
   );
+  useEffect(() => localStorage.setItem("notylo-stylus-only", String(stylusOnly)), [stylusOnly]);
   useEffect(() => localStorage.setItem("notylo-brush-id", brushId), [brushId]);
   useEffect(() => {
     localStorage.setItem("notylo-pressure-sensitivity", String(inkDynamics.pressureSensitivity));
@@ -371,7 +378,8 @@ export function EditorWorkspace(props: Props) {
         pinch.current = {
           distance: distance(points[0]!, points[1]!),
           zoom: cameraRef.current.zoom,
-          center: midpoint(points[0]!, points[1]!)
+          center: midpoint(points[0]!, points[1]!),
+          camera: cameraRef.current
         };
         draftRef.current = undefined;
         dragRef.current = undefined;
@@ -379,6 +387,10 @@ export function EditorWorkspace(props: Props) {
         event.preventDefault();
         return;
       }
+    }
+    if (stylusOnly && event.pointerType === "touch" && isInkTool) {
+      event.preventDefault();
+      return;
     }
     if (
       document.notebook.settings.palmRejection === "auto" &&
@@ -474,16 +486,21 @@ export function EditorWorkspace(props: Props) {
       const points = [...touchPointers.current.values()];
       const currentDistance = distance(points[0]!, points[1]!);
       const rect = viewportRef.current!.getBoundingClientRect();
-      const at = {
+      const currentCenter = midpoint(points[0]!, points[1]!);
+      const initialAt = {
         x: pinch.current.center.x - rect.left - origin.x,
         y: pinch.current.center.y - rect.top - origin.y
       };
-      const before = screenToWorld(at, cameraRef.current);
+      const currentAt = {
+        x: currentCenter.x - rect.left - origin.x,
+        y: currentCenter.y - rect.top - origin.y
+      };
+      const before = screenToWorld(initialAt, pinch.current.camera);
       const zoom = Math.min(
         10,
         Math.max(0.05, (pinch.current.zoom * currentDistance) / pinch.current.distance)
       );
-      setCamera({ x: at.x - before.x * zoom, y: at.y - before.y * zoom, zoom });
+      setCamera({ x: currentAt.x - before.x * zoom, y: currentAt.y - before.y * zoom, zoom });
       event.preventDefault();
       return;
     }
@@ -989,8 +1006,14 @@ export function EditorWorkspace(props: Props) {
         onRedo={props.onRedo}
         onBack={() => history.back()}
         onExport={() => setShowExport(true)}
+        toolsOpen={mobileToolsOpen}
+        onToggleTools={() => setMobileToolsOpen((value) => !value)}
       />
-      <div className={`editor-main sidebar-${sidebarPosition}`}>
+      <div
+        className={`editor-main sidebar-${sidebarPosition} ${
+          mobileToolsOpen ? "mobile-tools-open" : ""
+        }`}
+      >
         <EditorToolRail
           tool={tool}
           showBrushes={showBrushes}
@@ -998,6 +1021,7 @@ export function EditorWorkspace(props: Props) {
           inspectorOpen={showInspector}
           onToolChange={(nextTool) => {
             setTool(nextTool);
+            setMobileToolsOpen(false);
             if (nextTool === "pen") setBrushId("ink-fineliner");
             if (nextTool === "pencil") setBrushId("pencil-sketch");
             if (nextTool === "highlighter") setBrushId("highlighter-flat");
@@ -1012,7 +1036,10 @@ export function EditorWorkspace(props: Props) {
               .openFiles("image/*,.pdf,.docx,.xlsx,.xls,.csv,.txt,.md", true)
               .then((files) => insertFiles(files))
           }
-          onToggleInspector={() => setShowInspector((value) => !value)}
+          onToggleInspector={() => {
+            setShowInspector((value) => !value);
+            setMobileToolsOpen(false);
+          }}
         />
         <div
           className={`canvas-area ${
@@ -1247,6 +1274,7 @@ export function EditorWorkspace(props: Props) {
             dynamics={inkDynamics}
             paletteVisible={showPalette}
             sidebarPosition={sidebarPosition}
+            stylusOnly={stylusOnly}
             shapeRecognition={shapeRecognition}
             whiteboardBackground={document.notebook.settings.whiteboardBackground}
             isWhiteboard={document.notebook.mode === "whiteboard"}
@@ -1258,6 +1286,7 @@ export function EditorWorkspace(props: Props) {
             onDynamics={setInkDynamics}
             onPaletteVisible={setShowPalette}
             onSidebarPosition={setSidebarPosition}
+            onStylusOnly={setStylusOnly}
             onShapeRecognition={setShapeRecognition}
             onWhiteboardBackground={(background) =>
               props.onReplace((current) => ({
@@ -1287,6 +1316,7 @@ export function EditorWorkspace(props: Props) {
               }))
             }
             onOcr={(mode) => void runOcr(mode)}
+            onClose={() => setShowInspector(false)}
             ocrBusy={ocrBusy}
             ocrStatus={ocrStatus}
           />

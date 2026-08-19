@@ -26,3 +26,14 @@ export function readStoredSidebar(): SidebarPosition {
   const value = localStorage.getItem("notylo-sidebar-position");
   return value === "right" || value === "hidden" ? value : "left";
 }
+
+export function readStoredPoint(key: string, fallback: { x: number; y: number }) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) ?? "null");
+    return value && typeof value.x === "number" && typeof value.y === "number"
+      ? { x: value.x, y: value.y }
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}

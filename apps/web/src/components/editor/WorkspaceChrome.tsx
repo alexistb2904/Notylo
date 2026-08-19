@@ -1,7 +1,7 @@
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import type { DocumentObject, NotebookDocument, ShapeObject } from "@notylo/document-model";
 import type { SaveState } from "../../lib/session";
-import { ArrowLeft, ChevronDown, ChevronUp, Plus, Redo2, Undo2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp, PanelLeft, Plus, Redo2, Undo2 } from "lucide-react";
 
 export function EditorHeader({
   document,
@@ -9,7 +9,9 @@ export function EditorHeader({
   onUndo,
   onRedo,
   onBack,
-  onExport
+  onExport,
+  toolsOpen,
+  onToggleTools
 }: {
   readonly document: NotebookDocument;
   readonly saveState: SaveState;
@@ -17,6 +19,8 @@ export function EditorHeader({
   onRedo(): void;
   onBack(): void;
   onExport(): void;
+  readonly toolsOpen: boolean;
+  onToggleTools(): void;
 }) {
   const label =
     saveState === "saved"
@@ -46,6 +50,14 @@ export function EditorHeader({
         {label}
       </div>
       <div className="header-actions">
+        <button
+          className="mobile-tools-toggle"
+          onClick={onToggleTools}
+          aria-label={toolsOpen ? "Masquer les outils" : "Afficher les outils"}
+          aria-expanded={toolsOpen}
+        >
+          <PanelLeft size={17} />
+        </button>
         <button onClick={onUndo} aria-label="Annuler">
           <Undo2 size={17} />
         </button>

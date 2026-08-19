@@ -9,6 +9,8 @@ RUN corepack enable && pnpm install --frozen-lockfile
 
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=$VITE_API_URL
+ARG VITE_REQUIRE_AUTH=true
+ENV VITE_REQUIRE_AUTH=$VITE_REQUIRE_AUTH
 
 RUN pnpm --filter @notylo/web build
 
