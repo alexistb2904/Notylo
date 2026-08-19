@@ -5,7 +5,7 @@ import {
   getInkSvgPathData,
   getInkTexture,
   getInkVisual,
-  getLiveInkOpacity
+  getPressureMaskSegments
 } from "./canvas/inkVector";
 import type { CanvasLayerProps } from "./canvas/types";
 import { VectorObjectLayer } from "./VectorObjectLayer";
@@ -27,6 +27,8 @@ export function CanvasLayer(props: CanvasLayerProps) {
   const rawTexture = useRef<SVGPathElement>(null);
   const straightBase = useRef<SVGPathElement>(null);
   const straightTexture = useRef<SVGPathElement>(null);
+  const rawPressureMask = useRef<SVGGElement>(null);
+  const straightPressureMask = useRef<SVGGElement>(null);
 
   useEffect(() => {
     const canvas = overlayCanvas.current;
@@ -35,13 +37,17 @@ export function CanvasLayer(props: CanvasLayerProps) {
     const rawTexturePath = rawTexture.current;
     const straightBasePath = straightBase.current;
     const straightTexturePath = straightTexture.current;
+    const rawPressureMaskGroup = rawPressureMask.current;
+    const straightPressureMaskGroup = straightPressureMask.current;
     if (
       !canvas ||
       !group ||
       !rawBasePath ||
       !rawTexturePath ||
       !straightBasePath ||
-      !straightTexturePath
+      !straightTexturePath ||
+      !rawPressureMaskGroup ||
+      !straightPressureMaskGroup
     )
       return;
 
@@ -54,6 +60,28 @@ export function CanvasLayer(props: CanvasLayerProps) {
       texture.style.display = "none";
     };
 
+    const updatePressureMask = (
+      group: SVGGElement,
+      segments: ReturnType<typeof getPressureMaskSegments>
+    ) => {
+      while (group.childElementCount < segments.length) {
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("stroke", "white");
+        line.setAttribute("stroke-linecap", "round");
+        group.appendChild(line);
+      }
+      while (group.childElementCount > segments.length) group.lastElementChild?.remove();
+      segments.forEach((segment, index) => {
+        const line = group.children[index] as SVGLineElement;
+        line.setAttribute("x1", String(segment.from.x));
+        line.setAttribute("y1", String(segment.from.y));
+        line.setAttribute("x2", String(segment.to.x));
+        line.setAttribute("y2", String(segment.to.y));
+        line.setAttribute("stroke-opacity", String(segment.opacity));
+        line.setAttribute("stroke-width", String((props.draftRef.current?.size ?? 1) * 2.5));
+      });
+    };
+
     const paintLivePair = (
       base: SVGPathElement,
       texture: SVGPathElement,
@@ -62,7 +90,9 @@ export function CanvasLayer(props: CanvasLayerProps) {
       opacity: number,
       activeOffset: number,
       keyPrefix: string,
-      currentKey: string
+      currentKey: string,
+      maskGroup: SVGGElement,
+      maskId: string
     ): string => {
       if (!points.length || opacity <= 0.001) {
         hidePair(base, texture);
@@ -100,7 +130,7 @@ export function CanvasLayer(props: CanvasLayerProps) {
       const visual = getInkVisual(ink);
       const textureSpec = getInkTexture(ink);
       const d = getInkSvgPathData(ink);
-      const baseOpacity = getLiveInkOpacity(ink) * opacity;
+      const baseOpacity = visual.baseAlpha * opacity;
       const pageTransform = `translate(0 ${activeOffset})`;
 
       base.setAttribute("d", d);
@@ -109,6 +139,10 @@ export function CanvasLayer(props: CanvasLayerProps) {
       base.setAttribute("transform", pageTransform);
       base.style.mixBlendMode = visual.multiply ? "multiply" : "normal";
       base.style.display = d ? "" : "none";
+      const pressureSegments = getPressureMaskSegments(ink);
+      updatePressureMask(maskGroup, pressureSegments);
+      if (pressureSegments.length) base.setAttribute("mask", `url(#${maskId})`);
+      else base.removeAttribute("mask");
 
       if (textureSpec?.d) {
         texture.setAttribute("d", textureSpec.d);
@@ -119,6 +153,8 @@ export function CanvasLayer(props: CanvasLayerProps) {
         texture.setAttribute("stroke-linecap", "round");
         texture.setAttribute("transform", pageTransform);
         texture.style.mixBlendMode = visual.multiply ? "multiply" : "normal";
+        if (pressureSegments.length) texture.setAttribute("mask", `url(#${maskId})`);
+        else texture.removeAttribute("mask");
         texture.style.display = "";
       } else {
         texture.style.display = "none";
@@ -176,7 +212,9 @@ export function CanvasLayer(props: CanvasLayerProps) {
           1 - progress,
           activeOffset,
           "raw",
-          rawKey
+          rawKey,
+          rawPressureMaskGroup,
+          "notylo-live-raw-pressure"
         );
         straightKey = paintLivePair(
           straightBasePath,
@@ -186,7 +224,9 @@ export function CanvasLayer(props: CanvasLayerProps) {
           progress,
           activeOffset,
           "straight",
-          straightKey
+          straightKey,
+          straightPressureMaskGroup,
+          "notylo-live-straight-pressure"
         );
       } else {
         rawKey = paintLivePair(
@@ -197,7 +237,9 @@ export function CanvasLayer(props: CanvasLayerProps) {
           1,
           activeOffset,
           "raw",
-          rawKey
+          rawKey,
+          rawPressureMaskGroup,
+          "notylo-live-raw-pressure"
         );
         hidePair(straightBasePath, straightTexturePath);
         straightKey = "";
@@ -256,6 +298,14 @@ export function CanvasLayer(props: CanvasLayerProps) {
           overflow: "hidden"
         }}
       >
+        <defs>
+          <mask id="notylo-live-raw-pressure" maskContentUnits="userSpaceOnUse">
+            <g ref={rawPressureMask} />
+          </mask>
+          <mask id="notylo-live-straight-pressure" maskContentUnits="userSpaceOnUse">
+            <g ref={straightPressureMask} />
+          </mask>
+        </defs>
         <g ref={liveGroup}>
           <path ref={rawBase} style={{ display: "none" }} />
           <path ref={rawTexture} style={{ display: "none" }} />
