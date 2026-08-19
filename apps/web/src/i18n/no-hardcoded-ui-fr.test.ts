@@ -16,7 +16,6 @@ const frenchUiMarkers = [
   "Déplacer",
   "Modifier",
   "Chargement",
-  "Impossible",
   "Préparation",
   "Lecture seule",
   "Lecture et écriture",
