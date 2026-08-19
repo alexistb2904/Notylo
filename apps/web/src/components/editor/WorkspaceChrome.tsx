@@ -70,6 +70,7 @@ export function EditorHeader({
                     ? "Conflit de synchronisation"
                     : "Erreur de sauvegarde";
   const PublicModeIcon = publicMode === "read" ? Eye : PencilLine;
+  const publicModeLabel = publicMode === "read" ? "Lecture seule" : "Lecture et écriture";
 
   return (
     <header
@@ -90,9 +91,13 @@ export function EditorHeader({
         <h1>{document.notebook.title}</h1>
       </div>
       {publicMode && (
-        <div className={`public-mode-badge public-mode-badge--${publicMode}`}>
-          <PublicModeIcon size={14} />
-          <span>{publicMode === "read" ? "Lecture seule" : "Lecture et écriture"}</span>
+        <div
+          className={`public-mode-badge public-mode-badge--${publicMode}`}
+          aria-label={publicModeLabel}
+          title={publicModeLabel}
+        >
+          <PublicModeIcon size={14} aria-hidden="true" />
+          <span aria-hidden="true">{publicModeLabel}</span>
         </div>
       )}
       <div className={`save-status ${saveState} ${publicMode ? "public-save-status" : ""}`}>
