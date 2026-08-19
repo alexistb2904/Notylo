@@ -23,10 +23,7 @@ async function drawStroke(page: Page, yOffset: number) {
 
   const start = {
     x: Math.min(visibleRight - 190, visibleLeft + 100),
-    y: Math.max(
-      visibleTop + 35,
-      Math.min(visibleBottom - 35, box.y + 100 + yOffset)
-    )
+    y: Math.max(visibleTop + 35, Math.min(visibleBottom - 35, box.y + 100 + yOffset))
   };
   const target = await page.evaluate(({ x, y }) => {
     const element = document.elementFromPoint(x, y);
@@ -83,9 +80,59 @@ test("creates a notebook from the mobile empty state", async ({ page }) => {
   await createNotebook(page, "Maths mobile");
 });
 
+test("uses a thumb-friendly mobile tool dock and bottom sheets", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await createNotebook(page, "Mobile tools E2E");
+
+  const dock = page.getByRole("navigation", { name: "Outils rapides" });
+  await expect(dock).toBeVisible();
+  await expect(dock.getByRole("button")).toHaveCount(6);
+  await expect(page.getByLabel("Afficher les outils")).toBeHidden();
+  await expect(page.getByLabel("Annuler")).toBeVisible();
+  await expect(page.getByLabel("Rétablir")).toBeVisible();
+
+  const dockBox = await dock.boundingBox();
+  expect(dockBox).not.toBeNull();
+  if (!dockBox) return;
+  expect(dockBox.y + dockBox.height).toBeLessThanOrEqual(844);
+  expect(dockBox.y).toBeGreaterThan(740);
+
+  const palette = page.getByRole("toolbar", { name: "Palette de dessin" });
+  await expect(palette).toBeVisible();
+  const paletteBox = await palette.boundingBox();
+  expect(paletteBox).not.toBeNull();
+  if (paletteBox) expect(paletteBox.y + paletteBox.height).toBeLessThan(dockBox.y);
+
+  await dock.getByRole("button", { name: "Plus d’outils" }).click();
+  const sheet = page.locator(".tool-rail.mobile-sheet-open");
+  await expect(sheet).toBeVisible();
+  const sheetBox = await sheet.boundingBox();
+  expect(sheetBox).not.toBeNull();
+  if (sheetBox) {
+    expect(sheetBox.width).toBeGreaterThan(340);
+    expect(sheetBox.y + sheetBox.height).toBeLessThanOrEqual(dockBox.y - 2);
+  }
+
+  await sheet.getByTitle("Texte (T)").click();
+  await expect(sheet).toBeHidden();
+
+  await dock.getByRole("button", { name: "Stylo" }).click();
+  await expect(palette).toBeVisible();
+  await dock.getByRole("button", { name: "Plus d’outils" }).click();
+  await page.locator(".tool-rail.mobile-sheet-open").getByTitle("Brosses").click();
+
+  const brushes = page.getByRole("dialog", { name: "Brosses et épaisseurs" });
+  await expect(brushes).toBeVisible();
+  await expect(brushes.getByRole("button", { name: /^Crayon\b/i })).toBeVisible();
+  const brushBox = await brushes.boundingBox();
+  expect(brushBox).not.toBeNull();
+  if (brushBox) expect(brushBox.y + brushBox.height).toBeLessThanOrEqual(dockBox.y - 2);
+});
+
 test("pans with the middle mouse button without drawing", async ({ page }) => {
   await createNotebook(page, "Middle pan E2E");
-  await expect(page.getByTitle("Stylo")).toHaveAttribute("aria-pressed", "true");
+  const desktopTools = page.locator(".tool-rail");
+  await expect(desktopTools.getByTitle("Stylo (P)")).toHaveAttribute("aria-pressed", "true");
 
   const paper = page.getByLabel("Page du cahier").first();
   const before = await paper.boundingBox();
@@ -109,28 +156,29 @@ test("pans with the middle mouse button without drawing", async ({ page }) => {
   expect(after.x - before.x).toBeGreaterThan(60);
   expect(after.y - before.y).toBeGreaterThan(34);
   await expect.poll(() => storedInkCount(page)).toBe(0);
-  await expect(page.getByTitle("Stylo")).toHaveAttribute("aria-pressed", "true");
+  await expect(desktopTools.getByTitle("Stylo (P)")).toHaveAttribute("aria-pressed", "true");
 });
 
 test("renders live ink as vectors and keeps editor tools available", async ({ page }) => {
   await createNotebook(page, "Ink E2E");
+  const desktopTools = page.locator(".tool-rail");
 
   await drawStroke(page, 0);
   await expect.poll(() => storedInkCount(page)).toBe(1);
   await expect(page.locator(".vector-object-layer path")).toHaveCount(1);
 
-  await page.getByTitle("Brosses").click();
+  await desktopTools.getByTitle("Brosses").click();
   const brushDialog = page.getByRole("dialog", { name: "Brosses et épaisseurs" });
   const pencilPreset = brushDialog.getByRole("button", { name: /^Crayon\b/i });
   await pencilPreset.click();
-  await expect(page.getByTitle("Crayon")).toHaveAttribute("aria-pressed", "true");
+  await expect(desktopTools.getByTitle("Crayon")).toHaveAttribute("aria-pressed", "true");
 
   await drawStroke(page, 90);
   await expect.poll(() => storedInkCount(page)).toBe(2);
   // Pen = one outline. Pencil = one outline + one vector graphite texture path.
   await expect(page.locator(".vector-object-layer path")).toHaveCount(3);
 
-  await page.getByTitle("Brosses").click();
+  await desktopTools.getByTitle("Brosses").click();
   await expect(
     page.getByRole("dialog", { name: "Brosses et épaisseurs" }).getByRole("button", {
       name: /^Crayon\b/i
@@ -139,18 +187,18 @@ test("renders live ink as vectors and keeps editor tools available", async ({ pa
   await page.getByRole("button", { name: "Fermer" }).click();
 
   for (const tool of ["Surligneur", "Gomme (E)", "Texte (T)", "Forme libre", "Équation", "Tableau"]) {
-    const button = page.getByTitle(tool);
+    const button = desktopTools.getByTitle(tool);
     await button.click();
     await expect(button).toHaveAttribute("aria-pressed", "true");
   }
 
-  await page.getByTitle("Icônes de base").click();
+  await desktopTools.getByTitle("Icônes de base").click();
   await expect(page.getByRole("dialog", { name: "Icônes de base" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Carré" })).toBeVisible();
 
   await page.getByRole("button", { name: "Fermer" }).click();
-  await page.getByTitle("Gomme (E)").click();
-  await page.getByTitle("Propriétés").click();
+  await desktopTools.getByTitle("Gomme (E)").click();
+  await desktopTools.getByTitle("Propriétés").click();
   await expect(page.getByRole("button", { name: "Objet entier" })).toBeVisible();
   await page.getByRole("button", { name: "Gomme précise" }).click();
   await expect(page.getByRole("button", { name: "Gomme précise" })).toHaveAttribute(
