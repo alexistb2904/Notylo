@@ -32,6 +32,7 @@ import {
   resolveConflict,
   type SyncConflict
 } from "../lib/cloud";
+import { formatDate, intlLocale, t } from "../i18n";
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -146,7 +147,7 @@ export function HomePage() {
   const create = async () => {
     if (creating) return;
     const document = createNotebook({
-      title: title || "Nouveau cahier",
+      title: title || t("home.newNotebookDefault"),
       mode,
       background: { kind: background, color: "#ffffff", lineColor: "#dedede" }
     });
@@ -165,7 +166,7 @@ export function HomePage() {
       }
       navigate(`/notebook/${document.notebook.id}`);
     } catch (error) {
-      setCreationError(error instanceof Error ? error.message : "Le cahier n’a pas pu être créé.");
+      setCreationError(error instanceof Error ? error.message : t("home.createFailed"));
     } finally {
       setCreating(false);
     }
@@ -193,7 +194,7 @@ export function HomePage() {
         notebook: {
           ...imported.document.notebook,
           id: newNotebookId,
-          title: `${imported.document.notebook.title} (importé)`,
+          title: `${imported.document.notebook.title} (${t("home.importedSuffix")})`,
           createdAt: Date.now(),
           updatedAt: Date.now()
         },
@@ -224,7 +225,7 @@ export function HomePage() {
       await refresh();
       navigate(`/notebook/${document.notebook.id}`);
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Cette sauvegarde n’a pas pu être importée.");
+      alert(error instanceof Error ? error.message : t("home.importFailed"));
     }
   };
   const openNotebookMenu = (notebook: NotebookSummary) => {
@@ -266,22 +267,18 @@ export function HomePage() {
         .catch(() => setCloudStatus("error"));
     }
   };
-  const today = new Intl.DateTimeFormat("fr-FR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long"
-  }).format(new Date());
+  const today = formatDate(new Date(), { weekday: "long", day: "numeric", month: "long" });
   const normalizedQuery = searchQuery
     .trim()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .toLocaleLowerCase("fr-FR");
+    .toLocaleLowerCase(intlLocale);
   const visibleNotebooks = normalizedQuery
     ? notebooks.filter((notebook) =>
         notebook.title
           .normalize("NFD")
           .replace(/[\u0300-\u036f]/g, "")
-          .toLocaleLowerCase("fr-FR")
+          .toLocaleLowerCase(intlLocale)
           .includes(normalizedQuery)
       )
     : notebooks;
@@ -298,7 +295,7 @@ export function HomePage() {
           <button
             className="mobile-menu-toggle"
             type="button"
-            aria-label={mobileMenuOpen ? "Fermer le menu" : "Ouvrir le menu"}
+            aria-label={mobileMenuOpen ? t("home.closeMenu") : t("home.openMenu")}
             aria-expanded={mobileMenuOpen}
             aria-controls="mobile-navigation"
             onClick={() => setMobileMenuOpen((open) => !open)}
@@ -316,12 +313,12 @@ export function HomePage() {
           }}
         >
           <span className="workspace-avatar">{user?.email.slice(0, 1).toUpperCase() ?? "P"}</span>
-          <span>{user ? user.displayName : ready ? "Se connecter" : "Compte…"}</span>
+          <span>{user ? user.displayName : ready ? t("auth.signIn") : t("home.accountPending")}</span>
           <ChevronRight size={15} />
         </button>
-        <nav className="home-navigation" id="mobile-navigation" aria-label="Navigation principale">
+        <nav className="home-navigation" id="mobile-navigation" aria-label={t("home.mainNavigation")}>
           <a className="active" href="#mes-cahiers" onClick={() => setMobileMenuOpen(false)}>
-            <Grid2X2 size={17} /> Mes cahiers
+            <Grid2X2 size={17} /> {t("home.myNotebooks")}
           </a>
           <button
             type="button"
@@ -330,7 +327,7 @@ export function HomePage() {
               setDialogOpen(true);
             }}
           >
-            <Plus size={17} /> Nouveau cahier
+            <Plus size={17} /> {t("home.newNotebook")}
           </button>
           <button
             type="button"
@@ -339,30 +336,30 @@ export function HomePage() {
               void importNotezip();
             }}
           >
-            <Upload size={16} /> Importer
+            <Upload size={16} /> {t("common.import")}
           </button>
         </nav>
         <div className="sidebar-footer">
-          <p>{user ? "Compte connecté" : ""}</p>
+          <p>{user ? t("home.connectedAccount") : ""}</p>
           {user && cloudStatus === "conflict" && (
-            <span>Un choix de synchronisation est requis.</span>
+            <span>{t("home.syncChoiceRequired")}</span>
           )}
           {user && (
             <button className="sidebar-signout" type="button" onClick={logout}>
-              Se déconnecter
+              {t("home.signOut")}
             </button>
           )}
           <div className="utility-links">
             <Link to="/debug/pen">
-              <PenLine size={14} /> Stylet
+              <PenLine size={14} /> {t("home.stylus")}
             </Link>
             <Link to="/debug/benchmark">
-              <Gauge size={14} /> Diagnostic
+              <Gauge size={14} /> {t("home.diagnostic")}
             </Link>
           </div>
         </div>
       </aside>
-      <section className="home-content" aria-label="Mes cahiers">
+      <section className="home-content" aria-label={t("home.myNotebooks")}>
         <header className="home-topbar">
           <form className="home-search" role="search" onSubmit={(event) => event.preventDefault()}>
             <Search size={17} />
@@ -371,8 +368,8 @@ export function HomePage() {
               type="search"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Rechercher dans vos cahiers"
-              aria-label="Rechercher dans vos cahiers"
+              placeholder={t("home.search")}
+              aria-label={t("home.search")}
             />
             {searchQuery && (
               <button
@@ -382,7 +379,7 @@ export function HomePage() {
                   setSearchQuery("");
                   searchInputRef.current?.focus();
                 }}
-                aria-label="Effacer la recherche"
+                aria-label={t("home.clearSearch")}
               >
                 <X size={15} />
               </button>
@@ -391,64 +388,65 @@ export function HomePage() {
           <div className="home-account-actions">
             {user ? (
               <button className="account-button" type="button" onClick={() => navigate("/profile")}>
-                Mon profil
+                {t("home.myProfile")}
               </button>
             ) : (
               <button className="account-button" type="button" onClick={() => setAuthOpen(true)}>
-                Se connecter
+                {t("auth.signIn")}
               </button>
             )}
             <button className="new-page-button" onClick={() => setDialogOpen(true)}>
-              <Plus size={16} /> Nouveau
+              <Plus size={16} /> {t("home.new")}
             </button>
           </div>
         </header>
         <div className="home-page-heading">
           <p className="home-date">{today}</p>
-          <h1>Bonjour.</h1>
-          <p>Un espace calme pour écrire, dessiner et organiser vos idées.</p>
+          <h1>{t("home.hello")}</h1>
+          <p>{t("home.intro")}</p>
         </div>
         <section className="notebook-section" id="mes-cahiers">
           <div className="section-heading">
             <div>
-              <h2>Mes cahiers</h2>
-              <p>Votre bibliothèque personnelle, disponible hors ligne.</p>
+              <h2>{t("home.myNotebooks")}</h2>
+              <p>{t("home.libraryIntro")}</p>
             </div>
             <span>
-              {visibleNotebooks.length} sur {notebooks.length}{" "}
-              {notebooks.length > 1 ? "cahiers" : "cahier"}
+              {notebooks.length === 1
+                ? t("home.notebookCountOne", { visible: visibleNotebooks.length, total: notebooks.length })
+                : t("home.notebookCountMany", { visible: visibleNotebooks.length, total: notebooks.length })}
             </span>
           </div>
           {notebooks.length === 0 ? (
             <button
               className="empty-shelf"
               type="button"
-              aria-label="Créer votre premier cahier"
+              aria-label={t("home.createFirstAria")}
               onClick={() => setDialogOpen(true)}
             >
               <span className="empty-icon">
                 <FileText size={22} />
               </span>
               <span className="empty-shelf-copy">
-                <span className="empty-shelf-kicker">Votre espace est prêt</span>
-                <strong>Créez votre premier cahier</strong>
+                <span className="empty-shelf-kicker">{t("home.spaceReady")}</span>
+                <strong>{t("home.createFirst")}</strong>
                 <small>
-                  Une page vierge pour commencer, enregistrée uniquement sur cet appareil.
+                  {t("home.createFirstDescription")}
                 </small>
               </span>
               <span className="empty-action">
-                Commencer <ChevronRight size={16} />
+                {t("home.start")} <ChevronRight size={16} />
               </span>
             </button>
           ) : visibleNotebooks.length === 0 ? (
             <div className="search-empty" role="status">
               <Search size={20} aria-hidden="true" />
               <div>
-                <strong>Aucun cahier trouvé</strong>
-                <p>Essayez un autre titre ou effacez votre recherche.</p>
+                <strong>{t("home.noNotebookFound")}</strong>
+                <p>{t("home.noNotebookFoundDescription")}</p>
               </div>
               <button type="button" onClick={() => setSearchQuery("")}>
-                Effacer
+                {t("home.clear")}
               </button>
             </div>
           ) : (
@@ -467,18 +465,15 @@ export function HomePage() {
                     <MoreHorizontal size={18} />
                   </span>
                   <div className="card-copy">
-                    <p>{notebook.mode === "book" ? "Cahier" : "Whiteboard"}</p>
+                    <p>{notebook.mode === "book" ? t("common.book") : t("common.whiteboard")}</p>
                     <h3>{notebook.title}</h3>
                   </div>
                   <div className="card-footer">
                     <small>
-                      Modifié{" "}
-                      {new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium" }).format(
-                        notebook.updatedAt
-                      )}
+                      {t("home.modified", { date: formatDate(notebook.updatedAt, { dateStyle: "medium" }) })}
                     </small>
                     <span className="card-open">
-                      Ouvrir <ChevronRight size={14} />
+                      {t("home.open")} <ChevronRight size={14} />
                     </span>
                   </div>
                 </button>
@@ -502,40 +497,40 @@ export function HomePage() {
             }}
           >
             <div className="dialog-title">
-              <p className="eyebrow">Nouveau départ</p>
-              <h2>Créer un espace</h2>
+              <p className="eyebrow">{t("home.freshStart")}</p>
+              <h2>{t("home.createSpace")}</h2>
             </div>
             <label>
-              Nom
+              {t("home.name")}
               <input
                 autoFocus
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
-                placeholder="ex. Analyse — Chapitre 1"
+                placeholder={t("home.namePlaceholder")}
               />
             </label>
             <fieldset>
-              <legend>Format</legend>
+              <legend>{t("home.format")}</legend>
               <div className="segmented">
                 <button
                   type="button"
                   aria-pressed={mode === "book"}
                   onClick={() => setMode("book")}
                 >
-                  ▤ Cahier
+                  ▤ {t("common.book")}
                 </button>
                 <button
                   type="button"
                   aria-pressed={mode === "whiteboard"}
                   onClick={() => setMode("whiteboard")}
                 >
-                  ⌁ Whiteboard
+                  ⌁ {t("common.whiteboard")}
                 </button>
               </div>
             </fieldset>
             {mode === "book" && (
               <fieldset>
-                <legend>Fond de page</legend>
+                <legend>{t("home.pageBackground")}</legend>
                 <div className="background-picks">
                   {(["blank", "ruled", "grid-5", "dots", "seyes"] as const).map((value) => (
                     <button
@@ -546,14 +541,14 @@ export function HomePage() {
                       key={value}
                     >
                       {value === "blank"
-                        ? "Vierge"
+                        ? t("home.backgroundBlank")
                         : value === "ruled"
-                          ? "Lignes"
+                          ? t("home.backgroundRuled")
                           : value === "grid-5"
-                            ? "Quadrillé"
+                            ? t("home.backgroundGrid")
                             : value === "dots"
-                              ? "Points"
-                              : "Seyès"}
+                              ? t("home.backgroundDots")
+                              : t("home.backgroundSeyes")}
                     </button>
                   ))}
                 </div>
@@ -561,10 +556,10 @@ export function HomePage() {
             )}
             <div className="dialog-actions">
               <button type="button" className="text-button" onClick={() => setDialogOpen(false)}>
-                Annuler
+                {t("common.cancel")}
               </button>
               <button type="submit" className="primary-action" disabled={creating}>
-                {creating ? "Création…" : "Créer le cahier"}
+                {creating ? t("home.creating") : t("home.createNotebookAction")}
               </button>
             </div>
             {creationError && (
@@ -589,11 +584,11 @@ export function HomePage() {
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="dialog-title">
-              <p className="eyebrow">{notebookMenu.mode === "book" ? "Cahier" : "Whiteboard"}</p>
+              <p className="eyebrow">{notebookMenu.mode === "book" ? t("common.book") : t("common.whiteboard")}</p>
               <h2 id="notebook-menu-title">{notebookMenu.title}</h2>
             </div>
             <label>
-              Renommer
+              {t("home.rename")}
               <input value={rename} onChange={(event) => setRename(event.target.value)} />
             </label>
             <div className="notebook-menu-actions">
@@ -602,29 +597,29 @@ export function HomePage() {
                   className="primary-action"
                   onClick={() => navigate(`/notebook/${notebookMenu.id}`)}
                 >
-                  Ouvrir le cahier
+                  {t("home.openNotebook")}
                 </button>
               </div>
               <div
                 className="notebook-menu-secondary"
                 role="group"
-                aria-label="Actions secondaires"
+                aria-label={t("home.secondaryActions")}
               >
                 <button className="outline-action" onClick={() => void renameNotebook()}>
-                  Enregistrer le nom
+                  {t("home.saveName")}
                 </button>
                 <button className="outline-action" onClick={() => void exportNotebook()}>
-                  Exporter une copie
+                  {t("home.exportCopy")}
                 </button>
               </div>
               <div className="notebook-menu-danger">
                 <button className="danger-action" onClick={() => setConfirmDelete(true)}>
-                  Supprimer…
+                  {t("home.delete")}
                 </button>
               </div>
             </div>
             <button className="text-button menu-close" onClick={() => setNotebookMenu(undefined)}>
-              Fermer
+              {t("common.close")}
             </button>
           </section>
         </div>
@@ -641,18 +636,17 @@ export function HomePage() {
             aria-modal="true"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <p className="eyebrow">Action irréversible</p>
-            <h2>Supprimer « {notebookMenu.title} » ?</h2>
+            <p className="eyebrow">{t("home.irreversible")}</p>
+            <h2>{t("home.deleteTitle", { title: notebookMenu.title })}</h2>
             <p>
-              Le cahier sera retiré immédiatement de cet appareil. La suppression cloud sera
-              synchronisée dès qu’une connexion et un compte seront disponibles.
+              {t("home.deleteDescription")}
             </p>
             <div className="dialog-actions">
               <button className="text-button" onClick={() => setConfirmDelete(false)}>
                 Annuler
               </button>
               <button className="danger-action" onClick={() => void deleteNotebook()}>
-                Oui, supprimer
+                {t("home.deleteConfirm")}
               </button>
             </div>
           </section>
@@ -672,37 +666,37 @@ export function HomePage() {
           >
             <p className="eyebrow">
               {conflicts[0].kind === "deleted" || conflicts[0].kind === "local-delete"
-                ? "Conflit de suppression"
-                : "Conflit de synchronisation"}
+                ? t("home.deleteConflict")
+                : t("home.syncConflict")}
             </p>
             <h2 id="sync-conflict-title">
               {conflicts[0].kind === "deleted"
-                ? `« ${conflicts[0].title} » a été supprimé dans le cloud`
+                ? t("home.deletedCloudTitle", { title: conflicts[0].title })
                 : conflicts[0].kind === "local-delete"
-                  ? `La suppression de « ${conflicts[0].title} » est en conflit`
-                  : `Choisir la copie de « ${conflicts[0].title} »`}
+                  ? t("home.localDeleteConflictTitle", { title: conflicts[0].title })
+                  : t("home.copyConflictTitle", { title: conflicts[0].title })}
             </h2>
             <p className="sync-conflict-intro">
               {conflicts[0].kind === "deleted"
-                ? "Cet appareil contient une copie modifiée depuis la dernière synchronisation. Choisissez si vous souhaitez la restaurer ou accepter la suppression cloud."
+                ? t("home.deletedCloudIntro")
                 : conflicts[0].kind === "local-delete"
-                  ? "Cet appareil a demandé une suppression, mais le cahier a été modifié dans le cloud entre-temps. Aucun changement n’est perdu tant que vous n’avez pas choisi."
-                  : "Les deux copies ont été modifiées. La version choisie deviendra immédiatement la nouvelle copie cloud."}
+                  ? t("home.localDeleteConflictIntro")
+                  : t("home.copyConflictIntro")}
             </p>
             <div className="sync-conflict-options">
               <article>
-                <p>Cet appareil</p>
+                <p>{t("common.thisDevice")}</p>
                 <strong>
                   {conflicts[0].kind === "local-delete"
-                    ? `Suppression demandée ${formatSyncDate(conflicts[0].deletedAt)}`
+                    ? t("home.deletionRequestedAt", { date: formatSyncDate(conflicts[0].deletedAt) })
                     : formatSyncDate(conflicts[0].local.notebook.updatedAt)}
                 </strong>
                 <small>
                   {conflicts[0].kind === "deleted"
-                    ? "Restaurer cette copie dans le cloud."
+                    ? t("home.restoreCloudCopy")
                     : conflicts[0].kind === "local-delete"
-                      ? "Confirmer la suppression, même si le cloud contient une version plus récente."
-                      : "Conserver cette copie puis remplacer le cloud."}
+                      ? t("home.confirmDeleteNewerCloud")
+                      : t("home.keepLocalDescription")}
                 </small>
                 <button
                   className="primary-action"
@@ -710,23 +704,23 @@ export function HomePage() {
                   onClick={() => void resolveCurrentConflict("local")}
                 >
                   {conflicts[0].kind === "deleted"
-                    ? "Restaurer le cahier"
+                    ? t("home.restoreNotebook")
                     : conflicts[0].kind === "local-delete"
-                      ? "Confirmer la suppression"
-                      : "Garder cette copie"}
+                      ? t("home.confirmDeletion")
+                      : t("home.keepThisCopy")}
                 </button>
               </article>
               <article>
-                <p>Cloud</p>
+                <p>{t("common.cloud")}</p>
                 {conflicts[0].kind === "deleted" ? (
                   <>
-                    <strong>Supprimé {formatSyncDate(conflicts[0].deletedAt)}</strong>
-                    <small>Supprimer aussi la copie modifiée de cet appareil.</small>
+                    <strong>{t("home.deletedAt", { date: formatSyncDate(conflicts[0].deletedAt) })}</strong>
+                    <small>{t("home.deleteLocalModified")}</small>
                   </>
                 ) : (
                   <>
                     <strong>{formatSyncDate(conflicts[0].cloud.notebook.updatedAt)}</strong>
-                    <small>Remplacer la copie de cet appareil par le cloud.</small>
+                    <small>{t("home.replaceLocalFromCloud")}</small>
                   </>
                 )}
                 <button
@@ -735,16 +729,14 @@ export function HomePage() {
                   onClick={() => void resolveCurrentConflict("cloud")}
                 >
                   {conflicts[0].kind === "deleted"
-                    ? "Accepter la suppression"
-                    : conflicts[0].kind === "local-delete"
-                      ? "Conserver le cloud"
-                      : "Garder le cloud"}
+                    ? t("home.acceptDeletion")
+                    : t("home.keepCloud")}
                 </button>
               </article>
             </div>
             {resolvingConflict && (
               <p className="sync-conflict-progress" role="status">
-                Application de votre choix…
+                {t("home.applyingChoice")}
               </p>
             )}
           </section>
@@ -755,5 +747,5 @@ export function HomePage() {
 }
 
 function formatSyncDate(value: number): string {
-  return new Intl.DateTimeFormat("fr-FR", { dateStyle: "full", timeStyle: "short" }).format(value);
+  return formatDate(value, { dateStyle: "full", timeStyle: "short" });
 }
