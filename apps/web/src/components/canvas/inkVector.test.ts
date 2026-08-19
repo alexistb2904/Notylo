@@ -31,7 +31,11 @@ const makeInk = (
   updatedAt: 1,
   color: "#111",
   size: 5,
-  tool: brushId.startsWith("pencil") ? "pencil" : brushId.startsWith("highlighter") ? "highlighter" : "pen",
+  tool: brushId.startsWith("pencil")
+    ? "pencil"
+    : brushId.startsWith("highlighter")
+      ? "highlighter"
+      : "pen",
   smoothing: 0.6,
   brushId,
   dynamics: {
@@ -94,8 +98,12 @@ describe("professional vector ink engine", () => {
   });
 
   it("keeps tilt-aware calligraphy vectorised", () => {
-    const noTilt = getInkSvgPathData(makeInk([0.5, 0.5, 0.5, 0.5], false, "ink-calligraphy", false));
-    const tilted = getInkSvgPathData(makeInk([0.5, 0.5, 0.5, 0.5], false, "ink-calligraphy", true));
+    const noTilt = getInkSvgPathData(
+      makeInk([0.5, 0.5, 0.5, 0.5], false, "ink-calligraphy", false)
+    );
+    const tilted = getInkSvgPathData(
+      makeInk([0.5, 0.5, 0.5, 0.5], false, "ink-calligraphy", true)
+    );
     expect(tilted).not.toBe(noTilt);
     expect(tilted.endsWith("Z")).toBe(true);
   });
@@ -104,9 +112,32 @@ describe("professional vector ink engine", () => {
     expect(getInkBrushKind(makeInk([0.5], false, "pencil-sketch"))).toBe("graphite");
     expect(getInkBrushKind(makeInk([0.5], false, "pencil-2b"))).toBe("graphite-soft");
     expect(getInkBrushKind(makeInk([0.5], false, "highlighter-flat"))).toBe("highlighter");
-    expect(getInkTexture(makeInk([0.5, 0.5, 0.5], false, "pencil-sketch"))?.d).toBeTruthy();
+    expect(
+      getInkTexture(makeInk([0.5, 0.5, 0.5], false, "pencil-sketch"))?.d
+    ).toBeTruthy();
     expect(getInkTexture(makeInk([0.5, 0.5, 0.5], false, "wet-paint"))?.d).toBeTruthy();
     expect(getInkVisual(makeInk([0.5], false, "highlighter-flat")).multiply).toBe(true);
+  });
+
+  it("keeps pencil texture density tied to geometry rather than input sample count", () => {
+    const template = makeInk([0.5, 0.5], false, "pencil-sketch");
+    const line = (count: number): InkObject => ({
+      ...template,
+      points: Array.from({ length: count }, (_, index) => ({
+        x: (120 * index) / (count - 1),
+        y: 0,
+        pressure: 0.5,
+        tiltX: 0,
+        tiltY: 0,
+        timestamp: index * (120 / Math.max(1, count - 1))
+      }))
+    });
+    const sparse = getInkTexture(line(7))?.d ?? "";
+    const dense = getInkTexture(line(61))?.d ?? "";
+    const sparseMarks = (sparse.match(/M/g) ?? []).length;
+    const denseMarks = (dense.match(/M/g) ?? []).length;
+    expect(sparseMarks).toBeGreaterThan(3);
+    expect(Math.abs(sparseMarks - denseMarks)).toBeLessThanOrEqual(1);
   });
 
   it("bounds pressure-opacity SVG mask complexity", () => {
