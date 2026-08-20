@@ -5,6 +5,7 @@ import "katex/dist/katex.min.css";
 import "./styles.css";
 import "./mobile-editor.css";
 import "./public-editor.css";
+import "./text-formatting.css";
 import { App } from "./App";
 import { AuthProvider } from "./lib/auth";
 import { applyDocumentLocale } from "./i18n";
