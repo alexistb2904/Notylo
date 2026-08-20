@@ -4,7 +4,8 @@ import type {
   InkDynamics,
   InkPoint,
   NotebookDocument,
-  ShapeObject
+  ShapeObject,
+  Transform
 } from "@notylo/document-model";
 import type { MutableRefObject } from "react";
 
@@ -31,6 +32,7 @@ export interface CanvasLayerProps {
   readonly draftRef: MutableRefObject<CanvasDraftInk | undefined>;
   readonly shapeDraftRef: MutableRefObject<ShapeObject | undefined>;
   readonly selection: readonly DocumentObject[];
+  readonly selectionTransform?: Transform | undefined;
   readonly selectionRect?: Rect | undefined;
   readonly lasso: readonly Point[];
   readonly dragOffset: Point;
