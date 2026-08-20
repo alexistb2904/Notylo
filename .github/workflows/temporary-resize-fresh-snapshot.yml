@@ -20,16 +20,10 @@ jobs:
           from pathlib import Path
           path = Path("apps/web/src/components/EditorWorkspace.tsx")
           text = path.read_text()
-          old = '''                    originals: selectedObjects,
-                    bounds,
-                    handle'''
-          new = '''                    originals: props.documentRef.current.objects.filter((object) =>
-                      selectedIds.includes(object.id)
-                    ),
-                    bounds,
-                    handle'''
-          if old not in text:
-            raise SystemExit("resize originals anchor missing")
+          old = "originals: selectedObjects,"
+          new = "originals: props.documentRef.current.objects.filter((object) => selectedIds.includes(object.id)),"
+          if text.count(old) != 1:
+            raise SystemExit(f"expected one resize originals anchor, found {text.count(old)}")
           path.write_text(text.replace(old, new, 1))
       - run: git diff --check
       - name: Commit fresh snapshot fix
