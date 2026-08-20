@@ -1,4 +1,4 @@
-name: Temporary resize type fix
+name: Temporary resize vector fix
 
 on:
   pull_request:
@@ -14,19 +14,46 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: editor/text-formatting-live-resize
-      - name: Narrow DOM preview object type
+      - name: Preserve existing drag transforms while previewing resize
         shell: python
         run: |
           from pathlib import Path
-          path = Path("apps/web/src/components/EditorWorkspace.tsx")
+          path = Path("apps/web/src/components/VectorObjectLayer.tsx")
           text = path.read_text()
-          old = '''                const displayObject = previewById.get(object.id) ?? object;'''
-          new = '''                const displayObject = (previewById.get(object.id) ?? object) as Exclude<
-                  DocumentObject,
-                  { readonly type: "ink" | "shape" }
-                >;'''
+          old = '''          const moveX = selected ? props.dragOffset.x : 0;
+          const moveY = pageOffsetY + (selected ? props.dragOffset.y : 0);
+          const resize = selected ? props.selectionTransform : undefined;
+          const resizeTransform = resize
+            ? `translate(${resize.dx} ${resize.dy}) scale(${resize.scaleX ?? 1} ${resize.scaleY ?? 1})`
+            : "";
+          const placementTransform = moveX || moveY ? `translate(${moveX} ${moveY})` : "";
+          const transform = [placementTransform, resizeTransform].filter(Boolean).join(" ");
+          return (
+            <g key={object.id} transform={transform || undefined}>
+              {object.type === "ink" ? (
+                <SvgInk object={object} dx={0} dy={0} />
+              ) : (
+                <SvgShape object={object} dx={0} dy={0} />
+              )}
+            </g>
+          );'''
+          new = '''          const dx = selected ? props.dragOffset.x : 0;
+          const dy = pageOffsetY + (selected ? props.dragOffset.y : 0);
+          const resize = selected ? props.selectionTransform : undefined;
+          const resizeTransform = resize
+            ? `translate(${resize.dx} ${resize.dy}) scale(${resize.scaleX ?? 1} ${resize.scaleY ?? 1})`
+            : undefined;
+          return (
+            <g key={object.id} transform={resizeTransform}>
+              {object.type === "ink" ? (
+                <SvgInk object={object} dx={dx} dy={dy} />
+              ) : (
+                <SvgShape object={object} dx={dx} dy={dy} />
+              )}
+            </g>
+          );'''
           if old not in text:
-              raise SystemExit("DOM preview type anchor missing")
+              raise SystemExit("vector preview composition anchor missing")
           path.write_text(text.replace(old, new, 1))
       - run: git diff --check
       - name: Commit fix
@@ -34,6 +61,6 @@ jobs:
           if git diff --quiet; then exit 0; fi
           git config user.name "notylo-bot"
           git config user.email "notylo-bot@users.noreply.github.com"
-          git add apps/web/src/components/EditorWorkspace.tsx
-          git commit -m "Narrow live resize DOM preview type [resize-type-fix]"
+          git add apps/web/src/components/VectorObjectLayer.tsx
+          git commit -m "Preserve vector drag behavior during resize preview [resize-vector-fix]"
           git push origin HEAD:editor/text-formatting-live-resize
