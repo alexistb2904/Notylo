@@ -381,15 +381,26 @@ export function EditorWorkspace(props: Props) {
     [document.notebook.mode, document.pages]
   );
 
-  const resizeObjectsAt = useCallback(
-    (state: DragState, point: Point): readonly DocumentObject[] => {
-      if (state.kind !== "resize" || !state.originals || !state.bounds || !state.handle) return [];
-      const transform = resizeTransform(state.bounds, point, state.handle);
-      return state.originals.map((object) => keepInsidePage(transformObject(object, transform)));
-    },
-    [keepInsidePage]
-  );
-  const queueResizePreview = useCallback(
+  const resizeResultAt = useCallback(
+  (state: DragState, point: Point): {
+    before: readonly DocumentObject[];
+    after: readonly DocumentObject[];
+  } => {
+    if (state.kind !== "resize" || !state.originals || !state.bounds || !state.handle)
+      return { before: [], after: [] };
+    const currentById = new Map(
+      props.documentRef.current.objects.map((object) => [object.id, object] as const)
+    );
+    const before = state.originals.map((object) => currentById.get(object.id) ?? object);
+    const transform = resizeTransform(state.bounds, point, state.handle);
+    return {
+      before,
+      after: before.map((object) => keepInsidePage(transformObject(object, transform)))
+    };
+  },
+  [keepInsidePage, props.documentRef]
+);
+const queueResizePreview = useCallback(
     (point: Point) => {
       resizePointRef.current = point;
       if (resizeFrameRef.current !== undefined) return;
@@ -398,11 +409,11 @@ export function EditorWorkspace(props: Props) {
         const activeState = dragRef.current;
         const activePoint = resizePointRef.current;
         if (!activeState || activeState.kind !== "resize" || !activePoint) return;
-        const preview = resizeObjectsAt(activeState, activePoint);
-        setResizePreview(preview);
+        const preview = resizeResultAt(activeState, activePoint);
+        setResizePreview(preview.after);
       });
     },
-    [resizeObjectsAt]
+    [resizeResultAt]
   );
   const clearResizePreview = useCallback(() => {
     if (resizeFrameRef.current !== undefined) window.cancelAnimationFrame(resizeFrameRef.current);
@@ -875,10 +886,10 @@ export function EditorWorkspace(props: Props) {
       state.handle
     ) {
       const finalPoint = interactionPointAt(event);
-      const finalObjects = resizeObjectsAt(state, finalPoint);
+      const result = resizeResultAt(state, finalPoint);
       clearResizePreview();
-      if (finalObjects.length)
-        props.onUpdate(state.originals, finalObjects, t("ops.resizeSelection"));
+      if (result.after.length)
+        props.onUpdate(result.before, result.after, t("ops.resizeSelection"));
       resizePointRef.current = undefined;
     }
     if (
