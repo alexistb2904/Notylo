@@ -1437,7 +1437,7 @@ export function EditorWorkspace(props: Props) {
                   dragRef.current = {
                     kind: "resize",
                     start,
-                    originals: selectedObjects,
+                    originals: props.documentRef.current.objects.filter((object) => selectedIds.includes(object.id)),
                     bounds,
                     handle
                   };
