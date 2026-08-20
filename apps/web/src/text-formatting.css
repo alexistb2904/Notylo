@@ -1,0 +1,107 @@
+.text-format-settings {
+  gap: 12px;
+}
+
+.text-format-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(92px, 0.7fr);
+  gap: 10px;
+}
+
+.text-select-property,
+.text-number-property,
+.text-color-property {
+  display: grid;
+  gap: 7px;
+}
+
+.text-select-property select,
+.text-number-property input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+  color: inherit;
+  padding: 0 10px;
+  font: inherit;
+}
+
+.text-number-property input {
+  font-variant-numeric: tabular-nums;
+}
+
+.text-color-property input[type="color"] {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 10px;
+}
+
+.text-format-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.text-format-toolbar button {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, currentColor 3%, transparent);
+  color: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.text-format-toolbar button:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.text-format-toolbar button:active {
+  transform: scale(0.96);
+}
+
+.text-format-toolbar button.active,
+.text-format-toolbar button[aria-pressed="true"] {
+  background: color-mix(in srgb, currentColor 13%, transparent);
+  border-color: color-mix(in srgb, currentColor 32%, transparent);
+}
+
+.text-format-divider {
+  width: 1px;
+  height: 24px;
+  margin: 0 2px;
+  background: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.text-format-hint {
+  display: block;
+  line-height: 1.45;
+  opacity: 0.7;
+}
+
+.dom-object.text {
+  overflow: visible;
+}
+
+.dom-object.text .text-object {
+  box-sizing: border-box;
+  overflow: auto;
+  padding: 4px 6px;
+  scrollbar-width: thin;
+}
+
+@media (max-width: 760px) {
+  .text-format-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .text-format-toolbar button {
+    width: 42px;
+    height: 42px;
+  }
+}
