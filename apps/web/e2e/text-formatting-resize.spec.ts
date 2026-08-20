@@ -29,31 +29,33 @@ test("formats a text block and previews resize before pointer release", async ({
   await text.blur();
 
   const toolbar = page.getByRole("toolbar", { name: "Mise en forme du texte" });
-  await toolbar.getByLabel("Police").selectOption("Manrope, sans-serif");
-  const size = toolbar.getByLabel("Taille de police");
+  await toolbar.getByRole("combobox", { name: "Police" }).selectOption("Manrope, sans-serif");
+  const size = toolbar.getByRole("spinbutton", { name: "Taille de police" });
   await size.fill("32");
   await size.press("Enter");
   await toolbar.getByRole("button", { name: "Gras" }).click();
   await toolbar.getByRole("button", { name: "Italique" }).click();
   await toolbar.getByRole("button", { name: "Centrer le texte" }).click();
 
-  await expect.poll(async () =>
-    text.evaluate((element) => {
-      const style = getComputedStyle(element);
-      return {
-        family: style.fontFamily,
-        size: style.fontSize,
-        weight: style.fontWeight,
-        fontStyle: style.fontStyle,
-        align: style.textAlign
-      };
-    })
-  ).toMatchObject({
-    size: "32px",
-    weight: "700",
-    fontStyle: "italic",
-    align: "center"
-  });
+  await expect
+    .poll(async () =>
+      text.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          family: style.fontFamily,
+          size: style.fontSize,
+          weight: style.fontWeight,
+          fontStyle: style.fontStyle,
+          align: style.textAlign
+        };
+      })
+    )
+    .toMatchObject({
+      size: "32px",
+      weight: "700",
+      fontStyle: "italic",
+      align: "center"
+    });
 
   const object = page.locator(".dom-object.text");
   const before = await object.boundingBox();
