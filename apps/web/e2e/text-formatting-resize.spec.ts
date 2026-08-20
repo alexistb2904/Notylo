@@ -20,6 +20,31 @@ async function addTextObject(page: Page) {
   await expect(page.getByRole("toolbar", { name: "Mise en forme du texte" })).toBeVisible();
 }
 
+async function storedTextWidth(page: Page): Promise<number | undefined> {
+  return page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("notylo-notes");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise<number | undefined>((resolve, reject) => {
+        const transaction = database.transaction("objects", "readonly");
+        const request = transaction.objectStore("objects").getAll();
+        request.onsuccess = () => {
+          const text = (request.result as Array<{ type?: string; width?: number }>).find(
+            (object) => object.type === "text"
+          );
+          resolve(typeof text?.width === "number" ? text.width : undefined);
+        };
+        request.onerror = () => reject(request.error);
+      });
+    } finally {
+      database.close();
+    }
+  });
+}
+
 test("formats a text block and previews resize before pointer release", async ({ page }) => {
   await createNotebook(page, "Texte adaptatif E2E");
   await addTextObject(page);
@@ -85,6 +110,10 @@ test("formats a text block and previews resize before pointer release", async ({
   expect(committed.width).toBeGreaterThan(before.width + 80);
 
   const committedWidth = committed.width;
+  await expect
+    .poll(() => storedTextWidth(page))
+    .toBeGreaterThan(before.width + 80);
+
   await page.reload();
   const reopened = await page.locator(".dom-object.text").boundingBox();
   expect(reopened).not.toBeNull();
