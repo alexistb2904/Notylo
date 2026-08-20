@@ -137,6 +137,10 @@ export interface TextObject extends BaseObject {
   readonly plainText: string;
   readonly fontFamily: string;
   readonly fontSize: number;
+  readonly fontWeight?: 400 | 500 | 600 | 700;
+  readonly italic?: boolean;
+  readonly underline?: boolean;
+  readonly lineHeight?: number;
   readonly color: string;
   readonly align: "left" | "center" | "right";
 }
