@@ -71,7 +71,10 @@ export function newText(input: ObjectBaseInput & { text?: string }): TextObject 
     fontFamily: "Newsreader, serif",
     fontSize: 22,
     color: "#292927",
-    align: "left"
+    align: "left",
+    bold: false,
+    italic: false,
+    underline: false
   };
 }
 export function newMath(input: ObjectBaseInput & { latex?: string }): MathObject {
