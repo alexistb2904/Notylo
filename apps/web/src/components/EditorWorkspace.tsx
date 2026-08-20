@@ -1430,7 +1430,10 @@ export function EditorWorkspace(props: Props) {
             )
               .filter((object) => object.type !== "ink" && object.type !== "shape")
               .map((object) => {
-                const displayObject = previewById.get(object.id) ?? object;
+                const displayObject = (previewById.get(object.id) ?? object) as Exclude<
+        DocumentObject,
+        { readonly type: "ink" | "shape" }
+      >;
                 return (
                   <DOMObject
                     key={object.id}
