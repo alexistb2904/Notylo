@@ -58,6 +58,7 @@ export function TextFormattingToolbar({ object, x, y, below = false, onChange }:
       style={{ left: x, top: y } as CSSProperties}
       onPointerDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
     >
       <select
         className="text-format-font"
