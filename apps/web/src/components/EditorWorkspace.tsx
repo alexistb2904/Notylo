@@ -195,7 +195,6 @@ export function EditorWorkspace(props: Props) {
   const dragRef = useRef<DragState | undefined>(undefined);
   const resizePointRef = useRef<Point | undefined>(undefined);
   const resizeFrameRef = useRef<number | undefined>(undefined);
-  const resizePreviewRef = useRef<readonly DocumentObject[] | undefined>(undefined);
   const [resizePreview, setResizePreview] = useState<readonly DocumentObject[]>();
   const penRecentAt = useRef(0);
   const activePenPointers = useRef(new Set<number>());
@@ -391,7 +390,7 @@ export function EditorWorkspace(props: Props) {
     [keepInsidePage]
   );
   const queueResizePreview = useCallback(
-    (state: DragState, point: Point) => {
+    (point: Point) => {
       resizePointRef.current = point;
       if (resizeFrameRef.current !== undefined) return;
       resizeFrameRef.current = window.requestAnimationFrame(() => {
@@ -400,7 +399,6 @@ export function EditorWorkspace(props: Props) {
         const activePoint = resizePointRef.current;
         if (!activeState || activeState.kind !== "resize" || !activePoint) return;
         const preview = resizeObjectsAt(activeState, activePoint);
-        resizePreviewRef.current = preview;
         setResizePreview(preview);
       });
     },
@@ -409,7 +407,6 @@ export function EditorWorkspace(props: Props) {
   const clearResizePreview = useCallback(() => {
     if (resizeFrameRef.current !== undefined) window.cancelAnimationFrame(resizeFrameRef.current);
     resizeFrameRef.current = undefined;
-    resizePreviewRef.current = undefined;
     setResizePreview(undefined);
   }, []);
 
@@ -468,6 +465,7 @@ export function EditorWorkspace(props: Props) {
         engine.current.select([object.id]);
         syncSelection();
         setTool("select");
+        if (object.type === "text") setShowInspector(true);
       }
     },
     [document, keepInsidePage, props, syncSelection]
@@ -753,7 +751,7 @@ export function EditorWorkspace(props: Props) {
     }
     if (state.kind === "lasso") setLasso((current) => [...current, point]);
     if (state.kind === "resize") {
-      queueResizePreview(state, point);
+      queueResizePreview(point);
       return;
     }
     if (state.kind === "arrow-point") resizePointRef.current = point;
@@ -1411,6 +1409,7 @@ export function EditorWorkspace(props: Props) {
               .filter((object) => object.type !== "ink" && object.type !== "shape")
               .map((object) => {
                 const renderedObject = resizePreviewById.get(object.id) ?? object;
+                if (renderedObject.type === "ink" || renderedObject.type === "shape") return null;
                 return (
                   <DOMObject
                     key={object.id}
