@@ -819,6 +819,108 @@ input:focus-visible,
   box-shadow: 0 14px 35px var(--tone-shadow);
   backdrop-filter: blur(12px);
 }
+.text-format-toolbar {
+  position: absolute;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  min-height: 42px;
+  padding: 5px;
+  overflow-x: auto;
+  color: var(--tone-950);
+  background: color-mix(in srgb, var(--tone-highlight) 94%, transparent);
+  border: 1px solid var(--tone-300);
+  border-radius: 11px;
+  box-shadow: 0 12px 32px var(--tone-shadow);
+  backdrop-filter: blur(14px);
+  transform: translate(-50%, calc(-100% - 10px));
+  pointer-events: auto;
+  scrollbar-width: none;
+}
+.text-format-toolbar::-webkit-scrollbar {
+  display: none;
+}
+.text-format-toolbar.is-below {
+  transform: translate(-50%, 10px);
+}
+.text-format-toolbar select,
+.text-format-toolbar input[type="number"] {
+  height: 31px;
+  color: var(--tone-850);
+  background: var(--tone-100);
+  border: 1px solid var(--tone-300);
+  border-radius: 7px;
+  outline: none;
+}
+.text-format-font {
+  width: 132px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+.text-format-size {
+  width: 55px;
+  padding: 0 6px;
+  font-size: 11px;
+  text-align: center;
+}
+.text-format-divider {
+  width: 1px;
+  height: 23px;
+  margin: 0 2px;
+  flex: 0 0 1px;
+  background: var(--tone-300);
+}
+.text-format-icon,
+.text-format-color {
+  width: 31px;
+  height: 31px;
+  flex: 0 0 31px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  color: var(--tone-700);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+}
+.text-format-icon:hover,
+.text-format-icon[aria-pressed="true"],
+.text-format-color:hover {
+  color: var(--tone-950);
+  background: var(--tone-100);
+  border-color: var(--tone-300);
+}
+.text-format-align {
+  display: flex;
+  gap: 1px;
+}
+.text-format-color {
+  position: relative;
+  cursor: pointer;
+}
+.text-format-color input {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--tone-100);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+.text-format-color input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.text-format-color input::-webkit-color-swatch {
+  border: 0;
+}
+
 .floating-palette {
   left: 18px;
   top: 18px;
@@ -1107,11 +1209,16 @@ input:focus-visible,
 }
 .text-object {
   width: 100%;
+  height: 100%;
   min-height: 100%;
   padding: 3px;
+  overflow: auto;
   outline: none;
+  line-height: 1.25;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
+  scrollbar-width: thin;
 }
 .math-object {
   width: 100%;

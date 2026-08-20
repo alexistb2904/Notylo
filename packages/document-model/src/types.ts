@@ -139,6 +139,10 @@ export interface TextObject extends BaseObject {
   readonly fontSize: number;
   readonly color: string;
   readonly align: "left" | "center" | "right";
+  /** Optional for backward compatibility with notebooks created before rich text controls. */
+  readonly bold?: boolean;
+  readonly italic?: boolean;
+  readonly underline?: boolean;
 }
 
 export interface MathObject extends BaseObject {

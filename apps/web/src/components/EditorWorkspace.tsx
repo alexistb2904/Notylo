@@ -25,7 +25,9 @@ import {
   type DocumentObject,
   type InkDynamics,
   type NotebookDocument,
-  type ShapeObject
+  type ShapeObject,
+  type TextObject,
+  type Transform
 } from "@notylo/document-model";
 import {
   defaultPosition,
@@ -55,6 +57,8 @@ import { ExportDialog } from "./ExportDialog";
 import { EditorToolRail } from "./editor/EditorToolRail";
 import { EditorHeader, ArrowPointHandles, PageNavigator, Paper } from "./editor/WorkspaceChrome";
 import { WorkspaceDrawers } from "./editor/WorkspaceDrawers";
+import { TextFormattingToolbar, type TextFormatPatch } from "./editor/TextFormattingToolbar";
+import { previewObjectBounds, transformChanged } from "./editor/resizePreview";
 import { DEFAULT_COLORS, type IconShape } from "./editor/workspaceConstants";
 import {
   distance,
@@ -178,6 +182,9 @@ export function EditorWorkspace(props: Props) {
   const [dragOffset, setDragOffset] = useState<Point>({ x: 0, y: 0 });
   const dragOffsetRef = useRef<Point>({ x: 0, y: 0 });
   const dragFrameRef = useRef<number | undefined>(undefined);
+  const [resizePreviewTransform, setResizePreviewTransform] = useState<Transform>();
+  const resizePreviewTransformRef = useRef<Transform | undefined>(undefined);
+  const resizeFrameRef = useRef<number | undefined>(undefined);
   const [showInspector, setShowInspector] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const [stylusOnly, setStylusOnly] = useState(() =>
@@ -271,6 +278,7 @@ export function EditorWorkspace(props: Props) {
       const timer = straightenGestureRef.current?.timer;
       if (timer !== undefined) window.clearTimeout(timer);
       if (dragFrameRef.current !== undefined) window.cancelAnimationFrame(dragFrameRef.current);
+      if (resizeFrameRef.current !== undefined) window.cancelAnimationFrame(resizeFrameRef.current);
     },
     []
   );
@@ -363,6 +371,20 @@ export function EditorWorkspace(props: Props) {
     dragFrameRef.current = undefined;
     dragOffsetRef.current = { x: 0, y: 0 };
     setDragOffset({ x: 0, y: 0 });
+  }, []);
+  const queueResizePreview = useCallback((transform: Transform) => {
+    resizePreviewTransformRef.current = transform;
+    if (resizeFrameRef.current !== undefined) return;
+    resizeFrameRef.current = window.requestAnimationFrame(() => {
+      resizeFrameRef.current = undefined;
+      setResizePreviewTransform(resizePreviewTransformRef.current);
+    });
+  }, []);
+  const resetResizePreview = useCallback(() => {
+    if (resizeFrameRef.current !== undefined) window.cancelAnimationFrame(resizeFrameRef.current);
+    resizeFrameRef.current = undefined;
+    resizePreviewTransformRef.current = undefined;
+    setResizePreviewTransform(undefined);
   }, []);
   const keepInsidePage = useCallback(
     <T extends DocumentObject>(object: T): T => {
@@ -477,6 +499,7 @@ export function EditorWorkspace(props: Props) {
         else eraserGestureRef.current = undefined;
         interactionPageRef.current = undefined;
         dragRef.current = undefined;
+        resetResizePreview();
         setCanvasActive(false);
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
@@ -645,7 +668,9 @@ export function EditorWorkspace(props: Props) {
       state.kind === "erase" ||
       state.kind === "lasso" ||
       state.kind === "pan" ||
-      state.kind === "move"
+      state.kind === "move" ||
+      state.kind === "resize" ||
+      state.kind === "arrow-point"
     )
       event.preventDefault();
     if (state.kind === "pan") {
@@ -713,7 +738,11 @@ export function EditorWorkspace(props: Props) {
       return;
     }
     if (state.kind === "lasso") setLasso((current) => [...current, point]);
-    if (state.kind === "resize") resizePointRef.current = point;
+    if (state.kind === "resize" && state.bounds && state.handle) {
+      resizePointRef.current = point;
+      queueResizePreview(resizeTransform(state.bounds, point, state.handle));
+      return;
+    }
     if (state.kind === "arrow-point") resizePointRef.current = point;
   };
 
@@ -828,20 +857,18 @@ export function EditorWorkspace(props: Props) {
         );
       resetDragOffset();
     }
-    if (
-      state.kind === "resize" &&
-      state.originals &&
-      state.bounds &&
-      state.handle &&
-      resizePointRef.current
-    ) {
-      const transform = resizeTransform(state.bounds, resizePointRef.current, state.handle);
-      props.onUpdate(
-        state.originals,
-        state.originals.map((object) => keepInsidePage(transformObject(object, transform))),
-        t("ops.resizeSelection")
+    if (state.kind === "resize" && state.originals && state.bounds && state.handle) {
+      const finalPoint = interactionPointAt(event);
+      const transform = resizeTransform(state.bounds, finalPoint, state.handle);
+      const after = state.originals.map((object) =>
+        keepInsidePage(transformObject(object, transform))
       );
+      resetResizePreview();
       resizePointRef.current = undefined;
+      if (transformChanged(transform))
+        props.onUpdate(state.originals, after, t("ops.resizeSelection"));
+      interactionPageRef.current = undefined;
+      return;
     }
     if (
       state.kind === "arrow-point" &&
@@ -1158,6 +1185,44 @@ export function EditorWorkspace(props: Props) {
     label = t("ops.editObject")
   ) => props.onUpdate([before], [after], label);
   const selectedObjects = scopedObjects.filter((object) => selectedIds.includes(object.id));
+  const previewSelectedObjects = resizePreviewTransform
+    ? selectedObjects.map((object) => previewObjectBounds(object, resizePreviewTransform))
+    : selectedObjects;
+  const previewById = new Map(previewSelectedObjects.map((object) => [object.id, object]));
+  const selectedText =
+    selectedObjects.length === 1 && selectedObjects[0]?.type === "text"
+      ? (selectedObjects[0] as TextObject)
+      : undefined;
+  const previewText =
+    previewSelectedObjects.length === 1 && previewSelectedObjects[0]?.type === "text"
+      ? (previewSelectedObjects[0] as TextObject)
+      : undefined;
+  const updateTextFormat = (patch: TextFormatPatch) => {
+    if (!selectedText) return;
+    const current = props.documentRef.current.objects.find(
+      (object): object is TextObject => object.id === selectedText.id && object.type === "text"
+    );
+    if (!current) return;
+    props.onUpdate(
+      [current],
+      [{ ...current, ...patch, updatedAt: Date.now() }],
+      t("ops.formatText")
+    );
+  };
+  const textToolbarPosition = (() => {
+    if (!previewText) return undefined;
+    const pageOffset = previewText.pageId ? (pageOffsets[previewText.pageId] ?? 0) : 0;
+    const rawX = origin.x + camera.x + (previewText.x + previewText.width / 2) * camera.zoom;
+    const topY = origin.y + camera.y + (pageOffset + previewText.y) * camera.zoom;
+    const below = topY < 72;
+    const rawY = below ? topY + previewText.height * camera.zoom : topY;
+    const halfToolbar = Math.min(300, Math.max(0, (viewSize.width - 24) / 2));
+    const x =
+      viewSize.width <= 624
+        ? viewSize.width / 2
+        : Math.max(halfToolbar, Math.min(viewSize.width - halfToolbar, rawX));
+    return { x, y: rawY, below };
+  })();
   const runOcr = async (mode: OcrMode) => {
     if (ocrBusy) return;
     setOcrBusy(true);
@@ -1309,6 +1374,7 @@ export function EditorWorkspace(props: Props) {
             draftRef={draftRef}
             shapeDraftRef={shapeDraftRef}
             selection={selectedObjects}
+            selectionTransform={resizePreviewTransform}
             selectionRect={selectionRect}
             lasso={lasso}
             dragOffset={dragOffset}
@@ -1363,25 +1429,29 @@ export function EditorWorkspace(props: Props) {
               : scopedObjects
             )
               .filter((object) => object.type !== "ink" && object.type !== "shape")
-              .map((object) => (
-                <DOMObject
-                  key={object.id}
-                  object={object}
-                  selected={selectedIds.includes(object.id)}
-                  dragOffset={selectedIds.includes(object.id) ? dragOffset : undefined}
-                  offsetY={object.pageId ? (pageOffsets[object.pageId] ?? 0) : 0}
-                  onUpdate={updateObject}
-                  readOnly={readOnly}
-                />
-              ))}
+              .map((object) => {
+                const displayObject = previewById.get(object.id) ?? object;
+                return (
+                  <DOMObject
+                    key={object.id}
+                    object={displayObject}
+                    selected={selectedIds.includes(object.id)}
+                    dragOffset={selectedIds.includes(object.id) ? dragOffset : undefined}
+                    offsetY={object.pageId ? (pageOffsets[object.pageId] ?? 0) : 0}
+                    onUpdate={updateObject}
+                    readOnly={readOnly}
+                  />
+                );
+              })}
             {!readOnly && selectedObjects.length > 0 && (
               <SelectionBox
-                objects={selectedObjects}
+                objects={previewSelectedObjects}
                 dragOffset={dragOffset}
                 offsetY={activePage ? (pageOffsets[activePage.id] ?? 0) : 0}
                 onResizeStart={(handle, event) => {
                   const bounds = engine.current.selectionBounds();
                   if (!bounds) return;
+                  resetResizePreview();
                   event.stopPropagation();
                   viewportRef.current?.setPointerCapture(event.pointerId);
                   const start = interactionPointAt(event);
@@ -1397,6 +1467,7 @@ export function EditorWorkspace(props: Props) {
               />
             )}
             {!readOnly &&
+              !resizePreviewTransform &&
               selectedObjects.length === 1 &&
               selectedObjects[0]?.type === "shape" &&
               selectedObjects[0].shape === "poly-arrow" &&
@@ -1419,6 +1490,15 @@ export function EditorWorkspace(props: Props) {
                 />
               )}
           </div>
+          {!readOnly && selectedText && textToolbarPosition && (
+            <TextFormattingToolbar
+              object={selectedText}
+              x={textToolbarPosition.x}
+              y={textToolbarPosition.y}
+              below={textToolbarPosition.below}
+              onChange={updateTextFormat}
+            />
+          )}
           {document.notebook.mode === "whiteboard" && (
             <div className="whiteboard-coordinate">
               {Math.round(-camera.x / camera.zoom)}, {Math.round(-camera.y / camera.zoom)}

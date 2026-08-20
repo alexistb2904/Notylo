@@ -3,7 +3,8 @@ import type {
   DocumentObject,
   InkObject,
   NotebookDocument,
-  ShapeObject
+  ShapeObject,
+  Transform
 } from "@notylo/document-model";
 import { memo, useMemo, type MutableRefObject } from "react";
 import {
@@ -21,6 +22,7 @@ interface Props {
   readonly origin: Point;
   readonly cameraRef: MutableRefObject<Camera>;
   readonly selection: readonly DocumentObject[];
+  readonly selectionTransform?: Transform | undefined;
   readonly dragOffset: Point;
 }
 
@@ -63,12 +65,22 @@ export function VectorObjectLayer(props: Props) {
         {objects.map((object) => {
           const pageOffsetY = object.pageId ? (props.pageOffsets?.[object.pageId] ?? 0) : 0;
           const selected = selectedIds.has(object.id);
-          const dx = selected ? props.dragOffset.x : 0;
-          const dy = pageOffsetY + (selected ? props.dragOffset.y : 0);
-          return object.type === "ink" ? (
-            <SvgInk key={object.id} object={object} dx={dx} dy={dy} />
-          ) : (
-            <SvgShape key={object.id} object={object} dx={dx} dy={dy} />
+          const moveX = selected ? props.dragOffset.x : 0;
+          const moveY = pageOffsetY + (selected ? props.dragOffset.y : 0);
+          const resize = selected ? props.selectionTransform : undefined;
+          const resizeTransform = resize
+            ? `translate(${resize.dx} ${resize.dy}) scale(${resize.scaleX ?? 1} ${resize.scaleY ?? 1})`
+            : "";
+          const placementTransform = moveX || moveY ? `translate(${moveX} ${moveY})` : "";
+          const transform = [placementTransform, resizeTransform].filter(Boolean).join(" ");
+          return (
+            <g key={object.id} transform={transform || undefined}>
+              {object.type === "ink" ? (
+                <SvgInk object={object} dx={0} dy={0} />
+              ) : (
+                <SvgShape object={object} dx={0} dy={0} />
+              )}
+            </g>
           );
         })}
       </g>
