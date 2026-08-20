@@ -284,6 +284,7 @@ export function CanvasLayer(props: CanvasLayerProps) {
         origin={props.origin}
         cameraRef={props.cameraRef}
         selection={props.selection}
+        selectionTransform={props.selectionTransform}
         dragOffset={props.dragOffset}
       />
       <svg

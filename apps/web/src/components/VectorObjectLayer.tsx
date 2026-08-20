@@ -3,7 +3,8 @@ import type {
   DocumentObject,
   InkObject,
   NotebookDocument,
-  ShapeObject
+  ShapeObject,
+  Transform
 } from "@notylo/document-model";
 import { memo, useMemo, type MutableRefObject } from "react";
 import {
@@ -21,6 +22,7 @@ interface Props {
   readonly origin: Point;
   readonly cameraRef: MutableRefObject<Camera>;
   readonly selection: readonly DocumentObject[];
+  readonly selectionTransform?: Transform | undefined;
   readonly dragOffset: Point;
 }
 
@@ -65,10 +67,18 @@ export function VectorObjectLayer(props: Props) {
           const selected = selectedIds.has(object.id);
           const dx = selected ? props.dragOffset.x : 0;
           const dy = pageOffsetY + (selected ? props.dragOffset.y : 0);
-          return object.type === "ink" ? (
-            <SvgInk key={object.id} object={object} dx={dx} dy={dy} />
-          ) : (
-            <SvgShape key={object.id} object={object} dx={dx} dy={dy} />
+          const resize = selected ? props.selectionTransform : undefined;
+          const resizeTransform = resize
+            ? `translate(${resize.dx} ${resize.dy}) scale(${resize.scaleX ?? 1} ${resize.scaleY ?? 1})`
+            : undefined;
+          return (
+            <g key={object.id} transform={resizeTransform}>
+              {object.type === "ink" ? (
+                <SvgInk object={object} dx={dx} dy={dy} />
+              ) : (
+                <SvgShape object={object} dx={dx} dy={dy} />
+              )}
+            </g>
           );
         })}
       </g>

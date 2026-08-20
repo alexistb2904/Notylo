@@ -16,18 +16,32 @@ export function EditableText({
       className="text-object"
       contentEditable={!readOnly}
       suppressContentEditableWarning
+      spellCheck={!readOnly}
+      role="textbox"
+      aria-multiline="true"
       style={{
         fontFamily: object.fontFamily,
         fontSize: object.fontSize,
+        fontWeight: object.bold ? 700 : 400,
+        fontStyle: object.italic ? "italic" : "normal",
+        textDecorationLine: object.underline ? "underline" : "none",
         color: object.color,
         textAlign: object.align
       }}
       onBlur={(event) => {
         const text = event.currentTarget.textContent ?? "";
-        if (text !== object.plainText)
+        const requiredHeight = Math.ceil(event.currentTarget.scrollHeight + 6);
+        const nextHeight = Math.max(object.height, requiredHeight);
+        if (text !== object.plainText || nextHeight > object.height + 1)
           onUpdate(
             object,
-            { ...object, html: text, plainText: text, updatedAt: Date.now() },
+            {
+              ...object,
+              html: text,
+              plainText: text,
+              height: nextHeight,
+              updatedAt: Date.now()
+            },
             t("dom.editText")
           );
       }}
