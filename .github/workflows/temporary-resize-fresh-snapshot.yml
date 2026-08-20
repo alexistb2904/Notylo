@@ -1,0 +1,85 @@
+name: Temporary resize fresh snapshot fix
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.head_ref == 'editor/text-format-live-resize' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: editor/text-format-live-resize
+      - name: Resolve resize from latest document state
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path("apps/web/src/components/EditorWorkspace.tsx")
+          text = path.read_text()
+
+          helper_pattern = re.compile(
+              r'  const resizeObjectsAt = useCallback\(\n.*?\n  \);\n  const queueResizePreview = useCallback\(',
+              re.S,
+          )
+          helper_replacement = '''  const resizeResultAt = useCallback(
+            (state: DragState, point: Point): {
+              before: readonly DocumentObject[];
+              after: readonly DocumentObject[];
+            } => {
+              if (state.kind !== "resize" || !state.originals || !state.bounds || !state.handle)
+                return { before: [], after: [] };
+              const currentById = new Map(
+                props.documentRef.current.objects.map((object) => [object.id, object] as const)
+              );
+              const before = state.originals.map((object) => currentById.get(object.id) ?? object);
+              const transform = resizeTransform(state.bounds, point, state.handle);
+              return {
+                before,
+                after: before.map((object) => keepInsidePage(transformObject(object, transform)))
+              };
+            },
+            [keepInsidePage, props.documentRef]
+          );
+          const queueResizePreview = useCallback('''
+          text, count = helper_pattern.subn(helper_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f"expected one resize helper block, found {count}")
+
+          changes = [
+              ("const preview = resizeObjectsAt(activeState, activePoint);", "const preview = resizeResultAt(activeState, activePoint);"),
+              ("setResizePreview(preview);", "setResizePreview(preview.after);"),
+              ("[resizeObjectsAt]", "[resizeResultAt]"),
+              ("const finalObjects = resizeObjectsAt(state, finalPoint);", "const result = resizeResultAt(state, finalPoint);"),
+          ]
+          for old, new in changes:
+              if text.count(old) != 1:
+                  raise SystemExit(f"expected one anchor {old!r}, found {text.count(old)}")
+              text = text.replace(old, new, 1)
+
+          pointerup_pattern = re.compile(
+              r'if \(finalObjects\.length\)\s+props\.onUpdate\(state\.originals, finalObjects, t\("ops\.resizeSelection"\)\);'
+          )
+          text, count = pointerup_pattern.subn(
+              'if (result.after.length)\n        props.onUpdate(result.before, result.after, t("ops.resizeSelection"));',
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f"expected one pointerup update, found {count}")
+
+          path.write_text(text)
+      - run: git diff --check
+      - name: Commit fresh snapshot fix
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "notylo-bot"
+          git config user.email "notylo-bot@users.noreply.github.com"
+          git add apps/web/src/components/EditorWorkspace.tsx
+          git commit -m "Resolve live resize from latest document state"
+          git push origin HEAD:editor/text-format-live-resize

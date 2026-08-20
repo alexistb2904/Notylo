@@ -120,6 +120,11 @@ function visibleVectorObjects(
     present.add(selected.id);
   }
 
+  const selectedById = new Map(
+    props.selection.filter(isVectorObject).map((object) => [object.id, object] as const)
+  );
+  visible = visible.map((object) => selectedById.get(object.id) ?? object);
+
   return visible
     .filter((object) => !object.hidden)
     .sort(

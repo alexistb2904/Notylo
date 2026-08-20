@@ -70,6 +70,10 @@ export function newText(input: ObjectBaseInput & { text?: string }): TextObject 
     plainText: text,
     fontFamily: "Newsreader, serif",
     fontSize: 22,
+    fontWeight: 400,
+    italic: false,
+    underline: false,
+    lineHeight: 1.35,
     color: "#292927",
     align: "left"
   };

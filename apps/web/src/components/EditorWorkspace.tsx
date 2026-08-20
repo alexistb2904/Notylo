@@ -194,6 +194,8 @@ export function EditorWorkspace(props: Props) {
   const eraserLastApplyAt = useRef(0);
   const dragRef = useRef<DragState | undefined>(undefined);
   const resizePointRef = useRef<Point | undefined>(undefined);
+  const resizeFrameRef = useRef<number | undefined>(undefined);
+  const [resizePreview, setResizePreview] = useState<readonly DocumentObject[]>();
   const penRecentAt = useRef(0);
   const activePenPointers = useRef(new Set<number>());
   const internalClipboard = useRef<readonly DocumentObject[]>([]);
@@ -271,6 +273,7 @@ export function EditorWorkspace(props: Props) {
       const timer = straightenGestureRef.current?.timer;
       if (timer !== undefined) window.clearTimeout(timer);
       if (dragFrameRef.current !== undefined) window.cancelAnimationFrame(dragFrameRef.current);
+      if (resizeFrameRef.current !== undefined) window.cancelAnimationFrame(resizeFrameRef.current);
     },
     []
   );
@@ -378,6 +381,46 @@ export function EditorWorkspace(props: Props) {
     [document.notebook.mode, document.pages]
   );
 
+  const resizeResultAt = useCallback(
+  (state: DragState, point: Point): {
+    before: readonly DocumentObject[];
+    after: readonly DocumentObject[];
+  } => {
+    if (state.kind !== "resize" || !state.originals || !state.bounds || !state.handle)
+      return { before: [], after: [] };
+    const currentById = new Map(
+      props.documentRef.current.objects.map((object) => [object.id, object] as const)
+    );
+    const before = state.originals.map((object) => currentById.get(object.id) ?? object);
+    const transform = resizeTransform(state.bounds, point, state.handle);
+    return {
+      before,
+      after: before.map((object) => keepInsidePage(transformObject(object, transform)))
+    };
+  },
+  [keepInsidePage, props.documentRef]
+);
+const queueResizePreview = useCallback(
+    (point: Point) => {
+      resizePointRef.current = point;
+      if (resizeFrameRef.current !== undefined) return;
+      resizeFrameRef.current = window.requestAnimationFrame(() => {
+        resizeFrameRef.current = undefined;
+        const activeState = dragRef.current;
+        const activePoint = resizePointRef.current;
+        if (!activeState || activeState.kind !== "resize" || !activePoint) return;
+        const preview = resizeResultAt(activeState, activePoint);
+        setResizePreview(preview.after);
+      });
+    },
+    [resizeResultAt]
+  );
+  const clearResizePreview = useCallback(() => {
+    if (resizeFrameRef.current !== undefined) window.cancelAnimationFrame(resizeFrameRef.current);
+    resizeFrameRef.current = undefined;
+    setResizePreview(undefined);
+  }, []);
+
   const previewEraserGesture = () => {
     const gesture = eraserGestureRef.current;
     if (!gesture) return;
@@ -433,6 +476,7 @@ export function EditorWorkspace(props: Props) {
         engine.current.select([object.id]);
         syncSelection();
         setTool("select");
+        if (object.type === "text") setShowInspector(true);
       }
     },
     [document, keepInsidePage, props, syncSelection]
@@ -597,6 +641,8 @@ export function EditorWorkspace(props: Props) {
         event.shiftKey ? "add" : event.ctrlKey || event.metaKey ? "toggle" : "replace"
       );
       syncSelection();
+      if (hit.type === "text" && !event.shiftKey && !event.ctrlKey && !event.metaKey)
+        setShowInspector(true);
       resetDragOffset();
       dragRef.current = {
         kind: "move",
@@ -645,7 +691,9 @@ export function EditorWorkspace(props: Props) {
       state.kind === "erase" ||
       state.kind === "lasso" ||
       state.kind === "pan" ||
-      state.kind === "move"
+      state.kind === "move" ||
+      state.kind === "resize" ||
+      state.kind === "arrow-point"
     )
       event.preventDefault();
     if (state.kind === "pan") {
@@ -713,7 +761,10 @@ export function EditorWorkspace(props: Props) {
       return;
     }
     if (state.kind === "lasso") setLasso((current) => [...current, point]);
-    if (state.kind === "resize") resizePointRef.current = point;
+    if (state.kind === "resize") {
+      queueResizePreview(point);
+      return;
+    }
     if (state.kind === "arrow-point") resizePointRef.current = point;
   };
 
@@ -832,15 +883,13 @@ export function EditorWorkspace(props: Props) {
       state.kind === "resize" &&
       state.originals &&
       state.bounds &&
-      state.handle &&
-      resizePointRef.current
+      state.handle
     ) {
-      const transform = resizeTransform(state.bounds, resizePointRef.current, state.handle);
-      props.onUpdate(
-        state.originals,
-        state.originals.map((object) => keepInsidePage(transformObject(object, transform))),
-        t("ops.resizeSelection")
-      );
+      const finalPoint = interactionPointAt(event);
+      const result = resizeResultAt(state, finalPoint);
+      clearResizePreview();
+      if (result.after.length)
+        props.onUpdate(result.before, result.after, t("ops.resizeSelection"));
       resizePointRef.current = undefined;
     }
     if (
@@ -1158,6 +1207,12 @@ export function EditorWorkspace(props: Props) {
     label = t("ops.editObject")
   ) => props.onUpdate([before], [after], label);
   const selectedObjects = scopedObjects.filter((object) => selectedIds.includes(object.id));
+  const visualSelectedObjects = resizePreview ?? selectedObjects;
+  const resizePreviewById = new Map((resizePreview ?? []).map((object) => [object.id, object] as const));
+  const selectedTextObject =
+    selectedObjects.length === 1 && selectedObjects[0]?.type === "text"
+      ? selectedObjects[0]
+      : undefined;
   const runOcr = async (mode: OcrMode) => {
     if (ocrBusy) return;
     setOcrBusy(true);
@@ -1308,7 +1363,7 @@ export function EditorWorkspace(props: Props) {
             cameraRef={cameraRef}
             draftRef={draftRef}
             shapeDraftRef={shapeDraftRef}
-            selection={selectedObjects}
+            selection={visualSelectedObjects}
             selectionRect={selectionRect}
             lasso={lasso}
             dragOffset={dragOffset}
@@ -1363,20 +1418,24 @@ export function EditorWorkspace(props: Props) {
               : scopedObjects
             )
               .filter((object) => object.type !== "ink" && object.type !== "shape")
-              .map((object) => (
-                <DOMObject
-                  key={object.id}
-                  object={object}
-                  selected={selectedIds.includes(object.id)}
-                  dragOffset={selectedIds.includes(object.id) ? dragOffset : undefined}
-                  offsetY={object.pageId ? (pageOffsets[object.pageId] ?? 0) : 0}
-                  onUpdate={updateObject}
-                  readOnly={readOnly}
-                />
-              ))}
+              .map((object) => {
+                const renderedObject = resizePreviewById.get(object.id) ?? object;
+                if (renderedObject.type === "ink" || renderedObject.type === "shape") return null;
+                return (
+                  <DOMObject
+                    key={object.id}
+                    object={renderedObject}
+                    selected={selectedIds.includes(object.id)}
+                    dragOffset={selectedIds.includes(object.id) ? dragOffset : undefined}
+                    offsetY={object.pageId ? (pageOffsets[object.pageId] ?? 0) : 0}
+                    onUpdate={updateObject}
+                    readOnly={readOnly}
+                  />
+                );
+              })}
             {!readOnly && selectedObjects.length > 0 && (
               <SelectionBox
-                objects={selectedObjects}
+                objects={visualSelectedObjects}
                 dragOffset={dragOffset}
                 offsetY={activePage ? (pageOffsets[activePage.id] ?? 0) : 0}
                 onResizeStart={(handle, event) => {
@@ -1389,7 +1448,7 @@ export function EditorWorkspace(props: Props) {
                   dragRef.current = {
                     kind: "resize",
                     start,
-                    originals: selectedObjects,
+                    originals: props.documentRef.current.objects.filter((object) => selectedIds.includes(object.id)),
                     bounds,
                     handle
                   };
@@ -1467,6 +1526,15 @@ export function EditorWorkspace(props: Props) {
             dynamics={inkDynamics}
             eraserMode={eraserMode}
             eraserSize={eraserSize}
+            textSelection={selectedTextObject}
+            onTextStyle={(patch) => {
+              if (!selectedTextObject) return;
+              props.onUpdate(
+                [selectedTextObject],
+                [{ ...selectedTextObject, ...patch, updatedAt: Date.now() }],
+                t("ops.formatText")
+              );
+            }}
             paletteVisible={showPalette}
             sidebarPosition={sidebarPosition}
             stylusOnly={stylusOnly}

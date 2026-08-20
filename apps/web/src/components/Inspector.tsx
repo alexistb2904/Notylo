@@ -1,4 +1,4 @@
-import type { InkDynamics, PageBackground } from "@notylo/document-model";
+import type { InkDynamics, PageBackground, TextObject } from "@notylo/document-model";
 import type { OcrMode } from "../lib/ocr";
 import type { EraserMode } from "../lib/eraser";
 import type { Tool } from "./editor/types";
@@ -14,6 +14,7 @@ import {
   X
 } from "lucide-react";
 import { t } from "../i18n";
+import { TextFormattingControls, type TextStylePatch } from "./TextFormattingControls";
 
 type SidebarPosition = "left" | "right" | "hidden";
 
@@ -33,6 +34,8 @@ export function Inspector({
   stylusOnly,
   eraserMode,
   eraserSize,
+  textSelection,
+  onTextStyle,
   onColor,
   onSize,
   onSmoothing,
@@ -66,6 +69,8 @@ export function Inspector({
   readonly stylusOnly: boolean;
   readonly eraserMode: EraserMode;
   readonly eraserSize: number;
+  readonly textSelection?: TextObject | undefined;
+  onTextStyle(value: TextStylePatch): void;
   onColor(value: string): void;
   onSize(value: number): void;
   onSmoothing(value: number): void;
@@ -87,7 +92,7 @@ export function Inspector({
   const background = whiteboardBackground ?? { kind: "dots" as const, color: "#e7e7e3", lineColor: "#9c9c96" };
   const updateBackground = (change: Partial<PageBackground>) => onWhiteboardBackground({ ...background, ...change });
   const isInkTool = tool === "pen" || tool === "pencil" || tool === "highlighter";
-  const toolName = tool === "pen" ? t("inspector.pen") : tool === "pencil" ? t("inspector.pencil") : tool === "highlighter" ? t("inspector.highlighter") : tool === "eraser" ? t("inspector.eraser") : t("inspector.space");
+  const toolName = textSelection ? t("inspector.text") : tool === "pen" ? t("inspector.pen") : tool === "pencil" ? t("inspector.pencil") : tool === "highlighter" ? t("inspector.highlighter") : tool === "eraser" ? t("inspector.eraser") : t("inspector.space");
   return (
     <aside className="inspector">
       <div className="inspector-heading">
@@ -95,7 +100,8 @@ export function Inspector({
         <div><p className="eyebrow">{t("inspector.properties")}</p><h2>{toolName}</h2></div>
         <button className="inspector-close" onClick={onClose} aria-label={t("inspector.close")}><X size={17} /></button>
       </div>
-      <section className="settings-section" aria-labelledby="stroke-settings">
+      {textSelection && <TextFormattingControls object={textSelection} onChange={onTextStyle} />}
+      {!textSelection && <section className="settings-section" aria-labelledby="stroke-settings">
         <h3 id="stroke-settings">{tool === "eraser" ? t("inspector.eraser") : t("inspector.stroke")}</h3>
         {tool === "eraser" ? (
           <>
@@ -111,8 +117,8 @@ export function Inspector({
           </>
         )}
         {!isWhiteboard && <label className="property-label range-property"><span>{t("inspector.pageSpacing")}</span><strong>{pageGap} px</strong><input type="range" min="16" max="160" step="4" value={pageGap} onChange={(event) => onPageGap(Number(event.target.value))} /></label>}
-      </section>
-      {isInkTool && (
+      </section>}
+      {!textSelection && isInkTool && (
         <section className="settings-section pressure-settings" aria-labelledby="pressure-settings">
           <div className="section-title-row"><h3 id="pressure-settings">{t("inspector.stylusDynamics")}</h3><span className="tablet-status">{t("inspector.stylusBadge")}</span></div>
           <label className="property-label range-property">
