@@ -33,11 +33,11 @@ test("formats text and previews resize before pointer release", async ({ page })
   await expect(page.locator(".inspector")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Texte" })).toBeVisible();
 
-  await page.getByLabel("Police").selectOption("Arial, sans-serif");
-  await page.getByLabel("Taille de police").fill("30");
-  await page.getByRole("button", { name: "Gras" }).click();
-  await page.getByRole("button", { name: "Italique" }).click();
-  await page.getByRole("button", { name: "Centrer" }).click();
+  await page.getByLabel("Police", { exact: true }).selectOption("Arial, sans-serif");
+  await page.getByLabel("Taille de police", { exact: true }).fill("30");
+  await page.getByRole("button", { name: "Gras", exact: true }).click();
+  await page.getByRole("button", { name: "Italique", exact: true }).click();
+  await page.getByRole("button", { name: "Centrer", exact: true }).click();
 
   await expect
     .poll(() => text.evaluate((element) => getComputedStyle(element).fontFamily))
