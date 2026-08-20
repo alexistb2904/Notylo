@@ -51,30 +51,27 @@ jobs:
           if count != 1:
               raise SystemExit(f"expected one resize helper block, found {count}")
 
-          old_preview = '''        const preview = resizeObjectsAt(activeState, activePoint);
-                setResizePreview(preview);'''
-          new_preview = '''        const preview = resizeResultAt(activeState, activePoint);
-                setResizePreview(preview.after);'''
-          if old_preview not in text:
-              raise SystemExit("resize preview call anchor missing")
-          text = text.replace(old_preview, new_preview, 1)
-          text = text.replace("    [resizeObjectsAt]\n  );", "    [resizeResultAt]\n  );", 1)
+          changes = [
+              ("const preview = resizeObjectsAt(activeState, activePoint);", "const preview = resizeResultAt(activeState, activePoint);"),
+              ("setResizePreview(preview);", "setResizePreview(preview.after);"),
+              ("[resizeObjectsAt]", "[resizeResultAt]"),
+              ("const finalObjects = resizeObjectsAt(state, finalPoint);", "const result = resizeResultAt(state, finalPoint);"),
+          ]
+          for old, new in changes:
+              if text.count(old) != 1:
+                  raise SystemExit(f"expected one anchor {old!r}, found {text.count(old)}")
+              text = text.replace(old, new, 1)
 
           pointerup_pattern = re.compile(
-              r'      const finalPoint = interactionPointAt\(event\);\n'
-              r'      const finalObjects = resizeObjectsAt\(state, finalPoint\);\n'
-              r'      clearResizePreview\(\);\n'
-              r'      if \(finalObjects\.length\)\n'
-              r'        props\.onUpdate\(state\.originals, finalObjects, t\("ops\.resizeSelection"\)\);'
+              r'if \(finalObjects\.length\)\s+props\.onUpdate\(state\.originals, finalObjects, t\("ops\.resizeSelection"\)\);'
           )
-          pointerup_replacement = '''      const finalPoint = interactionPointAt(event);
-                const result = resizeResultAt(state, finalPoint);
-                clearResizePreview();
-                if (result.after.length)
-                  props.onUpdate(result.before, result.after, t("ops.resizeSelection"));'''
-          text, count = pointerup_pattern.subn(pointerup_replacement, text, count=1)
+          text, count = pointerup_pattern.subn(
+              'if (result.after.length)\n        props.onUpdate(result.before, result.after, t("ops.resizeSelection"));',
+              text,
+              count=1,
+          )
           if count != 1:
-              raise SystemExit(f"expected one pointerup resize block, found {count}")
+              raise SystemExit(f"expected one pointerup update, found {count}")
 
           path.write_text(text)
       - run: git diff --check
