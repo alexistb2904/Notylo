@@ -1,8 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type DragEvent
+} from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ChevronRight,
   FileText,
+  Folder,
+  FolderOpen,
+  FolderPlus,
   Gauge,
   Grid2X2,
   Menu,
@@ -33,6 +44,17 @@ import {
   type SyncConflict
 } from "../lib/cloud";
 import { formatDate, intlLocale, t } from "../i18n";
+import {
+  createHomeFolder,
+  deleteHomeFolder,
+  loadHomeFolders,
+  moveNotebookToFolder,
+  removeNotebookFromFolders,
+  renameHomeFolder,
+  saveHomeFolders,
+  type HomeFolderState,
+  type HomeFolder
+} from "../lib/homeFolders";
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -57,7 +79,26 @@ export function HomePage() {
   const [creationError, setCreationError] = useState<string>();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [folderState, setFolderState] = useState<HomeFolderState>(() => loadHomeFolders());
+  const [activeFolderId, setActiveFolderId] = useState<string>();
+  const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+  const [folderName, setFolderName] = useState("");
+  const [folderMenu, setFolderMenu] = useState<HomeFolder>();
+  const [folderRename, setFolderRename] = useState("");
+  const [draggedNotebookId, setDraggedNotebookId] = useState<string>();
+  const [dropTargetFolderId, setDropTargetFolderId] = useState<string>();
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const updateFolderState = useCallback(
+    (update: (current: HomeFolderState) => HomeFolderState) => {
+      setFolderState((current) => {
+        const next = update(current);
+        if (next !== current) saveHomeFolders(next);
+        return next;
+      });
+    },
+    []
+  );
 
   const refresh = useCallback(async () => setNotebooks(await repository.list()), [repository]);
   useEffect(() => {
@@ -164,6 +205,11 @@ export function HomePage() {
           setCloudStatus("error");
         }
       }
+      if (activeFolderId) {
+        updateFolderState((current) =>
+          moveNotebookToFolder(current, document.notebook.id, activeFolderId)
+        );
+      }
       navigate(`/notebook/${document.notebook.id}`);
     } catch (error) {
       setCreationError(error instanceof Error ? error.message : t("home.createFailed"));
@@ -222,6 +268,11 @@ export function HomePage() {
         );
       });
       await repository.save(document);
+      if (activeFolderId) {
+        updateFolderState((current) =>
+          moveNotebookToFolder(current, document.notebook.id, activeFolderId)
+        );
+      }
       await refresh();
       navigate(`/notebook/${document.notebook.id}`);
     } catch (error) {
@@ -252,6 +303,7 @@ export function HomePage() {
   const deleteNotebook = async () => {
     if (!notebookMenu) return;
     await repository.remove(notebookMenu.id);
+    updateFolderState((current) => removeNotebookFromFolders(current, notebookMenu.id));
     await refresh();
     setConfirmDelete(false);
     setNotebookMenu(undefined);
@@ -267,21 +319,68 @@ export function HomePage() {
         .catch(() => setCloudStatus("error"));
     }
   };
+  const createFolder = () => {
+    if (!folderName.trim()) return;
+    const folder: HomeFolder = {
+      id: createId("folder"),
+      name: folderName,
+      createdAt: Date.now()
+    };
+    updateFolderState((current) => createHomeFolder(current, folder));
+    setFolderName("");
+    setFolderDialogOpen(false);
+  };
+  const openFolderMenu = (folder: HomeFolder) => {
+    setFolderMenu(folder);
+    setFolderRename(folder.name);
+  };
+  const saveFolderName = () => {
+    if (!folderMenu || !folderRename.trim()) return;
+    updateFolderState((current) => renameHomeFolder(current, folderMenu.id, folderRename));
+    setFolderMenu(undefined);
+  };
+  const removeFolder = () => {
+    if (!folderMenu) return;
+    updateFolderState((current) => deleteHomeFolder(current, folderMenu.id));
+    if (activeFolderId === folderMenu.id) setActiveFolderId(undefined);
+    setFolderMenu(undefined);
+  };
+  const moveNotebook = (notebookId: string, folderId: string | undefined) => {
+    updateFolderState((current) => moveNotebookToFolder(current, notebookId, folderId));
+  };
+  const dropNotebookInFolder = (event: DragEvent<HTMLElement>, folderId: string) => {
+    event.preventDefault();
+    const notebookId =
+      draggedNotebookId || event.dataTransfer.getData("application/x-notylo-notebook");
+    if (notebookId) moveNotebook(notebookId, folderId);
+    setDraggedNotebookId(undefined);
+    setDropTargetFolderId(undefined);
+  };
   const today = formatDate(new Date(), { weekday: "long", day: "numeric", month: "long" });
   const normalizedQuery = searchQuery
     .trim()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLocaleLowerCase(intlLocale);
-  const visibleNotebooks = normalizedQuery
-    ? notebooks.filter((notebook) =>
-        notebook.title
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLocaleLowerCase(intlLocale)
-          .includes(normalizedQuery)
-      )
-    : notebooks;
+  const activeFolder = folderState.folders.find((folder) => folder.id === activeFolderId);
+  const notebooksAtCurrentLocation = notebooks.filter((notebook) => {
+    const folderId = folderState.notebookFolders[notebook.id];
+    return activeFolder ? folderId === activeFolder.id : !folderId;
+  });
+  const searchedNotebooks = normalizedQuery && !activeFolder ? notebooks : notebooksAtCurrentLocation;
+  const visibleNotebooks = searchedNotebooks.filter((notebook) =>
+    normalizedQuery ? normalizeForSearch(notebook.title).includes(normalizedQuery) : true
+  );
+  const visibleFolders = activeFolder
+    ? []
+    : folderState.folders.filter((folder) =>
+        normalizedQuery ? normalizeForSearch(folder.name).includes(normalizedQuery) : true
+      );
+  const libraryIsEmpty = notebooks.length === 0 && folderState.folders.length === 0;
+  const notebookCountTotal = activeFolder ? notebooksAtCurrentLocation.length : notebooks.length;
+  const notebookCountVisible = normalizedQuery ? visibleNotebooks.length : notebookCountTotal;
+  const searchHasNoResult =
+    Boolean(normalizedQuery) && visibleNotebooks.length === 0 && visibleFolders.length === 0;
   return (
     <main className="home-shell">
       <aside className={`home-sidebar${mobileMenuOpen ? " is-menu-open" : ""}`}>
@@ -328,6 +427,15 @@ export function HomePage() {
             }}
           >
             <Plus size={17} /> {t("home.newNotebook")}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMobileMenuOpen(false);
+              setFolderDialogOpen(true);
+            }}
+          >
+            <FolderPlus size={17} /> {t("home.newFolder")}
           </button>
           <button
             type="button"
@@ -406,18 +514,57 @@ export function HomePage() {
           <p>{t("home.intro")}</p>
         </div>
         <section className="notebook-section" id="mes-cahiers">
+          <div className="library-toolbar">
+            <div className="library-path" aria-label={t("home.folderNavigation")}>
+              {activeFolder ? (
+                <>
+                  <button type="button" onClick={() => setActiveFolderId(undefined)}>
+                    {t("home.myNotebooks")}
+                  </button>
+                  <ChevronRight size={14} aria-hidden="true" />
+                  <span>{activeFolder.name}</span>
+                </>
+              ) : (
+                <span>{t("home.library")}</span>
+              )}
+            </div>
+            <div className="library-toolbar-actions">
+              {activeFolder && (
+                <button
+                  className="library-quiet-action"
+                  type="button"
+                  onClick={() => openFolderMenu(activeFolder)}
+                >
+                  <MoreHorizontal size={16} /> {t("home.manageFolder")}
+                </button>
+              )}
+              <button
+                className="library-folder-action"
+                type="button"
+                onClick={() => setFolderDialogOpen(true)}
+              >
+                <FolderPlus size={16} /> {t("home.newFolder")}
+              </button>
+            </div>
+          </div>
           <div className="section-heading">
             <div>
-              <h2>{t("home.myNotebooks")}</h2>
-              <p>{t("home.libraryIntro")}</p>
+              <h2>{activeFolder?.name ?? t("home.myNotebooks")}</h2>
+              <p>{activeFolder ? t("home.folderIntro") : t("home.libraryIntro")}</p>
             </div>
             <span>
-              {notebooks.length === 1
-                ? t("home.notebookCountOne", { visible: visibleNotebooks.length, total: notebooks.length })
-                : t("home.notebookCountMany", { visible: visibleNotebooks.length, total: notebooks.length })}
+              {notebookCountTotal === 1
+                ? t("home.notebookCountOne", {
+                    visible: notebookCountVisible,
+                    total: notebookCountTotal
+                  })
+                : t("home.notebookCountMany", {
+                    visible: notebookCountVisible,
+                    total: notebookCountTotal
+                  })}
             </span>
           </div>
-          {notebooks.length === 0 ? (
+          {libraryIsEmpty ? (
             <button
               className="empty-shelf"
               type="button"
@@ -438,7 +585,7 @@ export function HomePage() {
                 {t("home.start")} <ChevronRight size={16} />
               </span>
             </button>
-          ) : visibleNotebooks.length === 0 ? (
+          ) : searchHasNoResult ? (
             <div className="search-empty" role="status">
               <Search size={20} aria-hidden="true" />
               <div>
@@ -450,35 +597,122 @@ export function HomePage() {
               </button>
             </div>
           ) : (
-            <div className="notebook-grid">
-              {visibleNotebooks.map((notebook) => (
-                <button
-                  key={notebook.id}
-                  className="notebook-card"
-                  style={{ "--cover": "#ddddd8" } as CSSProperties}
-                  onClick={() => openNotebookMenu(notebook)}
-                >
-                  <span className="card-icon">
-                    <FileText size={20} />
+            <>
+              {visibleFolders.length > 0 && (
+                <div className="folder-grid" role="list" aria-label={t("home.folders")}>
+                  {visibleFolders.map((folder) => {
+                    const itemCount = notebooks.filter(
+                      (notebook) => folderState.notebookFolders[notebook.id] === folder.id
+                    ).length;
+                    return (
+                      <article
+                        key={folder.id}
+                        role="listitem"
+                        className={`folder-card${dropTargetFolderId === folder.id ? " is-drop-target" : ""}`}
+                        onDragEnter={(event) => {
+                          event.preventDefault();
+                          if (draggedNotebookId) setDropTargetFolderId(folder.id);
+                        }}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = "move";
+                        }}
+                        onDragLeave={() => setDropTargetFolderId(undefined)}
+                        onDrop={(event) => dropNotebookInFolder(event, folder.id)}
+                      >
+                        <button
+                          className="folder-card-open"
+                          type="button"
+                          aria-label={t("home.openFolder", { name: folder.name })}
+                          onClick={() => {
+                            setActiveFolderId(folder.id);
+                            setSearchQuery("");
+                          }}
+                        >
+                          <span className="folder-card-icon">
+                            <Folder size={24} strokeWidth={1.7} />
+                          </span>
+                          <span className="folder-card-copy">
+                            <strong>{folder.name}</strong>
+                            <small>
+                              {itemCount === 1
+                                ? t("home.folderItemCountOne")
+                                : t("home.folderItemCountMany", { count: itemCount })}
+                            </small>
+                          </span>
+                          <ChevronRight className="folder-card-arrow" size={17} aria-hidden="true" />
+                        </button>
+                        <button
+                          className="folder-card-menu"
+                          type="button"
+                          aria-label={t("home.folderActions", { name: folder.name })}
+                          onClick={() => openFolderMenu(folder)}
+                        >
+                          <MoreHorizontal size={17} />
+                        </button>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+              {visibleNotebooks.length > 0 && (
+                <div className="notebook-grid">
+                  {visibleNotebooks.map((notebook) => (
+                    <button
+                      key={notebook.id}
+                      className={`notebook-card${draggedNotebookId === notebook.id ? " is-dragging" : ""}`}
+                      style={{ "--cover": "#ddddd8" } as CSSProperties}
+                      draggable
+                      onDragStart={(event) => {
+                        setDraggedNotebookId(notebook.id);
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("application/x-notylo-notebook", notebook.id);
+                      }}
+                      onDragEnd={() => {
+                        setDraggedNotebookId(undefined);
+                        setDropTargetFolderId(undefined);
+                      }}
+                      onClick={() => openNotebookMenu(notebook)}
+                    >
+                      <span className="card-icon">
+                        <FileText size={20} />
+                      </span>
+                      <span className="card-menu" aria-hidden>
+                        <MoreHorizontal size={18} />
+                      </span>
+                      <div className="card-copy">
+                        <p>{notebook.mode === "book" ? t("common.book") : t("common.whiteboard")}</p>
+                        <h3>{notebook.title}</h3>
+                      </div>
+                      <div className="card-footer">
+                        <small>
+                          {t("home.modified", {
+                            date: formatDate(notebook.updatedAt, { dateStyle: "medium" })
+                          })}
+                        </small>
+                        <span className="card-open">
+                          {t("home.open")} <ChevronRight size={14} />
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {activeFolder && !normalizedQuery && visibleNotebooks.length === 0 && (
+                <div className="folder-empty">
+                  <span>
+                    <FolderOpen size={22} />
                   </span>
-                  <span className="card-menu" aria-hidden>
-                    <MoreHorizontal size={18} />
-                  </span>
-                  <div className="card-copy">
-                    <p>{notebook.mode === "book" ? t("common.book") : t("common.whiteboard")}</p>
-                    <h3>{notebook.title}</h3>
+                  <div>
+                    <strong>{t("home.emptyFolder")}</strong>
+                    <p>{t("home.emptyFolderDescription")}</p>
                   </div>
-                  <div className="card-footer">
-                    <small>
-                      {t("home.modified", { date: formatDate(notebook.updatedAt, { dateStyle: "medium" }) })}
-                    </small>
-                    <span className="card-open">
-                      {t("home.open")} <ChevronRight size={14} />
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
+                  <button type="button" onClick={() => setDialogOpen(true)}>
+                    <Plus size={15} /> {t("home.createHere")}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </section>
       </section>
@@ -570,6 +804,122 @@ export function HomePage() {
           </form>
         </div>
       )}
+      {folderDialogOpen && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={() => setFolderDialogOpen(false)}
+        >
+          <form
+            className="new-notebook-dialog folder-dialog"
+            onMouseDown={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              createFolder();
+            }}
+          >
+            <div className="dialog-title folder-dialog-title">
+              <span aria-hidden="true">
+                <FolderPlus size={20} />
+              </span>
+              <div>
+                <p className="eyebrow">{t("home.localOrganization")}</p>
+                <h2>{t("home.createFolder")}</h2>
+              </div>
+            </div>
+            <label>
+              {t("home.folderName")}
+              <input
+                autoFocus
+                maxLength={80}
+                value={folderName}
+                onChange={(event) => setFolderName(event.target.value)}
+                placeholder={t("home.folderNamePlaceholder")}
+              />
+            </label>
+            <p className="folder-dialog-note">{t("home.folderLocalDescription")}</p>
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => setFolderDialogOpen(false)}
+              >
+                {t("common.cancel")}
+              </button>
+              <button className="primary-action" type="submit" disabled={!folderName.trim()}>
+                {t("home.createFolderAction")}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+      {folderMenu && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={() => setFolderMenu(undefined)}
+        >
+          <section
+            className="new-notebook-dialog notebook-menu-dialog folder-menu-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="folder-menu-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="dialog-title folder-dialog-title">
+              <span aria-hidden="true">
+                <FolderOpen size={20} />
+              </span>
+              <div>
+                <p className="eyebrow">{t("home.folder")}</p>
+                <h2 id="folder-menu-title">{folderMenu.name}</h2>
+              </div>
+            </div>
+            <label>
+              {t("home.renameFolder")}
+              <input
+                maxLength={80}
+                value={folderRename}
+                onChange={(event) => setFolderRename(event.target.value)}
+              />
+            </label>
+            <div className="notebook-menu-actions">
+              <div className="notebook-menu-primary">
+                <button
+                  className="primary-action"
+                  type="button"
+                  onClick={() => {
+                    setActiveFolderId(folderMenu.id);
+                    setSearchQuery("");
+                    setFolderMenu(undefined);
+                  }}
+                >
+                  {t("home.openThisFolder")}
+                </button>
+              </div>
+              <div className="notebook-menu-secondary">
+                <button
+                  className="outline-action"
+                  type="button"
+                  disabled={!folderRename.trim()}
+                  onClick={saveFolderName}
+                >
+                  {t("home.saveName")}
+                </button>
+              </div>
+              <div className="notebook-menu-danger folder-menu-danger">
+                <p>{t("home.deleteFolderDescription")}</p>
+                <button className="danger-action" type="button" onClick={removeFolder}>
+                  {t("home.deleteFolder")}
+                </button>
+              </div>
+            </div>
+            <button className="text-button menu-close" onClick={() => setFolderMenu(undefined)}>
+              {t("common.close")}
+            </button>
+          </section>
+        </div>
+      )}
       {notebookMenu && (
         <div
           className="modal-backdrop"
@@ -590,6 +940,21 @@ export function HomePage() {
             <label>
               {t("home.rename")}
               <input value={rename} onChange={(event) => setRename(event.target.value)} />
+            </label>
+            <label className="notebook-folder-field">
+              {t("home.moveToFolder")}
+              <select
+                value={folderState.notebookFolders[notebookMenu.id] ?? ""}
+                onChange={(event) => moveNotebook(notebookMenu.id, event.target.value || undefined)}
+              >
+                <option value="">{t("home.libraryRoot")}</option>
+                {folderState.folders.map((folder) => (
+                  <option key={folder.id} value={folder.id}>
+                    {folder.name}
+                  </option>
+                ))}
+              </select>
+              <small>{t("home.folderLocalOnly")}</small>
             </label>
             <div className="notebook-menu-actions">
               <div className="notebook-menu-primary">
@@ -748,4 +1113,11 @@ export function HomePage() {
 
 function formatSyncDate(value: number): string {
   return formatDate(value, { dateStyle: "full", timeStyle: "short" });
+}
+
+function normalizeForSearch(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase(intlLocale);
 }
