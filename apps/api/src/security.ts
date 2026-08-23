@@ -18,10 +18,11 @@ export function registerSecurityHooks(
     const referer = request.headers.referer;
     const fetchSite = request.headers["sec-fetch-site"];
     const requestOrigin = origin ?? (referer ? originFromReferer(referer) : undefined);
-    if (requestOrigin && !allowedOrigins.includes(requestOrigin)) {
+    const hasAllowedOrigin = Boolean(requestOrigin && allowedOrigins.includes(requestOrigin));
+    if (requestOrigin && !hasAllowedOrigin) {
       return reply.code(403).send({ error: "Origine de requête refusée." });
     }
-    if (fetchSite === "cross-site") {
+    if (fetchSite === "cross-site" && !hasAllowedOrigin) {
       return reply.code(403).send({ error: "Requête intersite refusée." });
     }
   });
