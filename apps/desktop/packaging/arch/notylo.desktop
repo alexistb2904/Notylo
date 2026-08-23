@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Notylo
+Comment=A local-first notebook and whiteboard
+Exec=notylo
+Icon=notylo
+Terminal=false
+Categories=Office;Utility;
+StartupNotify=true

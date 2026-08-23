@@ -16,9 +16,20 @@ export function readOrigins(isProduction: boolean): string[] {
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
+  // Tauri uses a private application origin. Windows/WebView2 uses
+  // http://tauri.localhost while other platforms use tauri://localhost.
+  // These are not wildcard origins: they only identify the installed app.
+  const desktopOrigins = ["tauri://localhost", "http://tauri.localhost"];
   return isProduction
-    ? [...new Set(configured)]
-    : [...new Set([...configured, "http://localhost:5173", "http://127.0.0.1:5173"])];
+    ? [...new Set([...configured, ...desktopOrigins])]
+    : [
+        ...new Set([
+          ...configured,
+          ...desktopOrigins,
+          "http://localhost:5173",
+          "http://127.0.0.1:5173"
+        ])
+      ];
 }
 
 export function isAllowedOrigin(

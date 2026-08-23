@@ -12,7 +12,9 @@ __pycache__/
 .pytest_cache/
 *.pyc
 data/
+apps/desktop/src-tauri/target/
 .corepack-cache/
 .pnpm-store/
 .vscode/
 .playwright-cli/
+output/

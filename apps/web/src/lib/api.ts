@@ -1,6 +1,8 @@
 import { intlLocale, localizeRemoteError, t } from "../i18n";
 
-const API_URL = (import.meta.env.VITE_API_URL ?? "http://localhost:3001").replace(/\/$/, "");
+const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+const defaultApiUrl = isTauri ? "https://notes.alexistb.com/api" : "http://localhost:3001";
+const API_URL = (import.meta.env.VITE_API_URL ?? defaultApiUrl).replace(/\/$/, "");
 const REQUEST_TIMEOUT_MS = 15_000;
 
 export type Account = {

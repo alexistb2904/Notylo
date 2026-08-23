@@ -1,0 +1,12 @@
+{
+  "name": "@notylo/desktop",
+  "version": "0.1.1",
+  "private": true,
+  "scripts": {
+    "dev": "cd src-tauri && node ../../web/node_modules/@tauri-apps/cli/tauri.js dev",
+    "dev:desktop": "pnpm dev",
+    "build": "cd src-tauri && node ../../web/node_modules/@tauri-apps/cli/tauri.js build",
+    "build:windows": "cd src-tauri && node ../../web/node_modules/@tauri-apps/cli/tauri.js build --bundles nsis",
+    "build:linux": "cd src-tauri && node ../../web/node_modules/@tauri-apps/cli/tauri.js build --bundles appimage,deb"
+  }
+}

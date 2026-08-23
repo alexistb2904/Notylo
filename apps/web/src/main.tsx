@@ -22,7 +22,16 @@ createRoot(document.getElementById("root")!).render(
 );
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
-  void navigator.serviceWorker
-    .register("/sw.js", { updateViaCache: "none" })
-    .catch(() => undefined);
+  const isTauri = "__TAURI_INTERNALS__" in window;
+  if (isTauri) {
+    // Tauri already ships the complete frontend and persists notebooks via
+    // IndexedDB. A browser service worker only adds a stale-shell failure mode.
+    void navigator.serviceWorker.getRegistrations().then((registrations) => {
+      registrations.forEach((registration) => void registration.unregister());
+    });
+  } else {
+    void navigator.serviceWorker
+      .register("/sw.js", { updateViaCache: "none" })
+      .catch(() => undefined);
+  }
 }

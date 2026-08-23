@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Notylo",
+  "version": "0.1.1",
+  "identifier": "com.alexistb.notylo",
+  "build": {
+    "beforeDevCommand": "node scripts/web.mjs dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "node scripts/web.mjs build",
+    "frontendDist": "../../web/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Notylo",
+        "url": "notylo-0.1.1.html",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http: https: data: blob:; media-src 'self' http: https: data: blob:; connect-src 'self' http: https: ws: wss:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self' blob:; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "appimage", "deb"],
+    "category": "Productivity",
+    "shortDescription": "A local-first notebook and whiteboard",
+    "longDescription": "Notylo is a local-first notebook and whiteboard for writing, drawing and organising ideas.",
+    "windows": {
+      "nsis": {
+        "displayLanguageSelector": true
+      }
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ]
+  }
+}

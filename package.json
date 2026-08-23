@@ -4,8 +4,12 @@
   "packageManager": "pnpm@11.19.0",
   "scripts": {
     "dev": "pnpm --filter @notylo/web dev",
+    "dev:desktop": "pnpm --dir apps/desktop dev",
     "dev:api": "pnpm --filter @notylo/api dev",
-    "build": "pnpm -r --if-present build",
+    "build": "pnpm --filter=!@notylo/desktop -r --if-present build",
+    "build:desktop": "pnpm --dir apps/desktop build",
+    "build:desktop:windows": "pnpm --dir apps/desktop build:windows",
+    "build:desktop:linux": "pnpm --dir apps/desktop build:linux",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "pnpm -r --if-present lint",
     "test": "pnpm -r --if-present test",

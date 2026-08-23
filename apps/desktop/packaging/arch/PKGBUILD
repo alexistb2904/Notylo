@@ -1,0 +1,31 @@
+# Maintainer: Alexis <contact@alexistb.com>
+pkgname=notylo
+pkgver=0.1.1
+pkgrel=1
+pkgdesc='A local-first notebook and whiteboard'
+arch=('x86_64')
+url='https://github.com/alexistb2904/Notylo'
+license=('MIT')
+depends=('gtk3' 'webkit2gtk-4.1' 'libappindicator-gtk3')
+makedepends=('base-devel' 'nodejs' 'pnpm' 'rust' 'cargo' 'openssl')
+source=("git+${url}.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "${srcdir}/Notylo"
+  git describe --tags --always | sed 's/^v//;s/-/+/g'
+}
+
+build() {
+  cd "${srcdir}/Notylo"
+  corepack enable
+  pnpm install --frozen-lockfile
+  pnpm --dir apps/desktop build:linux
+}
+
+package() {
+  cd "${srcdir}/Notylo"
+  install -Dm755 apps/desktop/src-tauri/target/release/notylo "${pkgdir}/usr/bin/notylo"
+  install -Dm644 apps/desktop/packaging/arch/notylo.desktop "${pkgdir}/usr/share/applications/notylo.desktop"
+  install -Dm644 apps/desktop/src-tauri/icons/128x128@2x.png "${pkgdir}/usr/share/icons/hicolor/256x256/apps/notylo.png"
+}
