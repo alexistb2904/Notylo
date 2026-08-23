@@ -2283,7 +2283,7 @@ dependencies = [
 
 [[package]]
 name = "notylo"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "serde_json",
  "tauri",
