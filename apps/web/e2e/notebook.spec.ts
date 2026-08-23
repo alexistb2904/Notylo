@@ -113,6 +113,33 @@ test("creates a notebook from the mobile empty state", async ({ page }) => {
   await createNotebook(page, "Maths mobile");
 });
 
+test("organizes notebooks in local folders without changing notebook storage", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 700 });
+  await createNotebook(page, "Maths dossier");
+  await page.goto("/");
+
+  await page.locator(".library-folder-action").click();
+  await page.getByLabel("Nom du dossier").fill("Cours");
+  await page.getByRole("button", { name: "Créer le dossier" }).click();
+  await expect(page.getByRole("button", { name: "Ouvrir Cours" })).toBeVisible();
+
+  await page.locator(".notebook-card").filter({ hasText: "Maths dossier" }).click();
+  await page.getByLabel("Déplacer vers").selectOption({ label: "Cours" });
+  await page.getByRole("button", { name: "Fermer" }).click();
+  await expect(page.locator(".notebook-card").filter({ hasText: "Maths dossier" })).toBeHidden();
+  await expect(page.locator(".folder-card").filter({ hasText: "1 cahier" })).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Ouvrir Cours" }).click();
+  await expect(page.getByRole("heading", { name: "Cours" })).toBeVisible();
+  await expect(page.locator(".notebook-card").filter({ hasText: "Maths dossier" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Gérer le dossier" }).click();
+  await page.getByRole("button", { name: "Supprimer le dossier" }).click();
+  await expect(page.getByRole("button", { name: "Ouvrir Cours" })).toBeHidden();
+  await expect(page.locator(".notebook-card").filter({ hasText: "Maths dossier" })).toBeVisible();
+});
+
 test("keeps the mobile toolbar inside the dynamic viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await createNotebook(page, "Mobile viewport E2E");
