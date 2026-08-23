@@ -127,16 +127,23 @@ test("keeps the mobile toolbar inside the dynamic viewport", async ({ page }) =>
     const metrics = await page.evaluate(() => {
       const shell = document.querySelector<HTMLElement>(".editor-shell");
       const header = document.querySelector<HTMLElement>(".editor-header");
+      const main = document.querySelector<HTMLElement>(".editor-main");
+      const canvas = document.querySelector<HTMLElement>(".canvas-area");
       const mobileDock = document.querySelector<HTMLElement>(".mobile-tool-dock");
-      if (!shell || !header || !mobileDock) throw new Error("Mobile editor chrome is missing");
+      if (!shell || !header || !main || !canvas || !mobileDock)
+        throw new Error("Mobile editor chrome is missing");
       const shellRect = shell.getBoundingClientRect();
       const headerRect = header.getBoundingClientRect();
+      const mainRect = main.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
       const dockRect = mobileDock.getBoundingClientRect();
       return {
         innerHeight: window.innerHeight,
         visualHeight: window.visualViewport?.height ?? window.innerHeight,
         shellTop: shellRect.top,
         shellBottom: shellRect.bottom,
+        mainBottom: mainRect.bottom,
+        canvasBottom: canvasRect.bottom,
         dockTop: dockRect.top,
         dockBottom: dockRect.bottom,
         headerBottom: headerRect.bottom
@@ -146,6 +153,9 @@ test("keeps the mobile toolbar inside the dynamic viewport", async ({ page }) =>
     const visibleHeight = Math.min(metrics.innerHeight, metrics.visualHeight);
     expect(metrics.shellTop).toBeGreaterThanOrEqual(-1);
     expect(metrics.shellBottom).toBeLessThanOrEqual(visibleHeight + 1);
+    expect(Math.abs(metrics.shellBottom - visibleHeight)).toBeLessThanOrEqual(1);
+    expect(Math.abs(metrics.mainBottom - metrics.shellBottom)).toBeLessThanOrEqual(1);
+    expect(Math.abs(metrics.canvasBottom - metrics.shellBottom)).toBeLessThanOrEqual(1);
     expect(metrics.dockBottom).toBeLessThanOrEqual(visibleHeight + 1);
     expect(metrics.dockTop).toBeGreaterThan(metrics.headerBottom);
   }
@@ -188,9 +198,19 @@ test("uses a thumb-friendly mobile tool dock and bottom sheets", async ({ page }
 
   const palette = page.getByRole("toolbar", { name: "Palette de dessin" });
   await expect(palette).toBeVisible();
+  await expect
+    .poll(async () => {
+      const box = await palette.boundingBox();
+      return box ? dockBox.y - (box.y + box.height) : Number.POSITIVE_INFINITY;
+    })
+    .toBeLessThan(32);
   const paletteBox = await palette.boundingBox();
   expect(paletteBox).not.toBeNull();
-  if (paletteBox) expect(paletteBox.y + paletteBox.height).toBeLessThan(dockBox.y);
+  if (paletteBox) {
+    const paletteBottom = paletteBox.y + paletteBox.height;
+    expect(paletteBottom).toBeLessThan(dockBox.y);
+    expect(dockBox.y - paletteBottom).toBeLessThan(32);
+  }
 
   await dock.getByRole("button", { name: "Plus d’outils" }).click();
   const sheet = page.locator(".tool-rail.mobile-sheet-open");

@@ -3,9 +3,9 @@
 .editor-shell.public-editor {
   height: 100vh;
   height: 100dvh;
-  min-height: 100vh;
-  min-height: 100dvh;
-  max-height: 100dvh;
+  height: var(--notylo-viewport-height, 100dvh);
+  min-height: var(--notylo-viewport-height, 100dvh);
+  max-height: var(--notylo-viewport-height, 100dvh);
   background: var(--surface);
 }
 
@@ -247,31 +247,6 @@
     bottom: max(12px, env(safe-area-inset-bottom));
   }
 
-  /* Mobile palette: respect the component's stored x/y instead of pinning it to the dock. */
-  .floating-palette {
-    left: var(--notylo-palette-x, 12px) !important;
-    top: var(--notylo-palette-y, 86px) !important;
-    right: auto !important;
-    bottom: auto !important;
-    transform: none !important;
-    width: max-content;
-    max-width: calc(100% - 16px);
-    overflow-x: auto;
-    overflow-y: hidden;
-    touch-action: pan-x;
-  }
-
-  .floating-palette .palette-grip {
-    position: sticky;
-    left: 0;
-    z-index: 2;
-    display: grid !important;
-    flex: 0 0 auto;
-    color: var(--ink-muted);
-    background: var(--surface-raised);
-    border-right: 1px solid var(--line-strong);
-    touch-action: none;
-  }
 }
 
 @media (max-width: 460px) {
