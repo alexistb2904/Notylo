@@ -39,7 +39,12 @@ import {
 } from "../lib/factories";
 import type { SaveState } from "../lib/session";
 import { webPlatform } from "../lib/platform";
-import { captureSpacingForZoom, compactInkPoints, createInkStabilizer } from "../lib/ink";
+import {
+  appendInkPoint,
+  captureSpacingForZoom,
+  compactInkPoints,
+  createInkStabilizer
+} from "../lib/ink";
 import {
   appendEraserPoint,
   eraseObjects,
@@ -550,7 +555,9 @@ export function EditorWorkspace(props: Props) {
       const preset = isShapeDrawing
         ? BRUSHES[0]
         : (BRUSHES.find((candidate) => candidate.id === brushId) ?? BRUSHES[0]);
-      const stabilizerState = createInkStabilizer(inkSmoothing);
+      const stabilizerState = createInkStabilizer(inkSmoothing, {
+        zoom: cameraRef.current.zoom
+      });
       draftRef.current = {
         points: [stabilizerState.push(toInkPoint(event, point))],
         tool: isShapeDrawing ? "pen" : (tool as DraftInk["tool"]),
@@ -781,6 +788,14 @@ export function EditorWorkspace(props: Props) {
           (sample) => interactionPointAt(sample, drawInset),
           captureSpacing,
           draft.stabilizerState
+        );
+        const finishingPoints = draft.stabilizerState.finish();
+        finishingPoints.forEach((finishingPoint, index) =>
+          appendInkPoint(
+            draft.points,
+            finishingPoint,
+            index === finishingPoints.length - 1 ? 0 : captureSpacing
+          )
         );
       }
       if (draft.points.length > 0) {

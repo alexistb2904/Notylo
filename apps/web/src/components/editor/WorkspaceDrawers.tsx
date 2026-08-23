@@ -78,9 +78,14 @@ export function WorkspaceDrawers({
       const host = element?.parentElement;
       if (!element || !host) return position;
       const edge = 8;
-      const bottomClearance = mobilePalette ? 86 : edge;
       const maxX = Math.max(edge, host.clientWidth - element.offsetWidth - edge);
-      const maxY = Math.max(edge, host.clientHeight - element.offsetHeight - bottomClearance);
+      const mobileDock = mobilePalette
+        ? host.parentElement?.querySelector<HTMLElement>(".mobile-tool-dock")
+        : undefined;
+      const lowerBoundary = mobileDock && window.getComputedStyle(mobileDock).display !== "none"
+        ? mobileDock.getBoundingClientRect().top - host.getBoundingClientRect().top - edge
+        : host.clientHeight - edge;
+      const maxY = Math.max(edge, lowerBoundary - element.offsetHeight);
       return {
         x: Math.min(maxX, Math.max(edge, position.x)),
         y: Math.min(maxY, Math.max(edge, position.y))
@@ -103,7 +108,7 @@ export function WorkspaceDrawers({
       setPalettePosition(
         clampPalettePosition({
           x: Math.max(8, (host.clientWidth - element.offsetWidth) / 2),
-          y: Math.max(8, host.clientHeight - element.offsetHeight - 86)
+          y: host.clientHeight
         })
       );
     } else {
@@ -114,6 +119,8 @@ export function WorkspaceDrawers({
       setPalettePosition((current) => clampPalettePosition(current))
     );
     observer.observe(host);
+    const mobileDock = host.parentElement?.querySelector<HTMLElement>(".mobile-tool-dock");
+    if (mobileDock) observer.observe(mobileDock);
     return () => observer.disconnect();
   }, [clampPalettePosition, mobilePalette, paletteVisible, tool]);
 

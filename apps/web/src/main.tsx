@@ -8,8 +8,10 @@ import "./public-editor.css";
 import { App } from "./App";
 import { AuthProvider } from "./lib/auth";
 import { applyDocumentLocale } from "./i18n";
+import { installVisualViewportHeightSync } from "./lib/viewport";
 
 applyDocumentLocale();
+installVisualViewportHeightSync();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

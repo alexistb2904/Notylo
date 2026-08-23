@@ -38,6 +38,11 @@ describe("ink sampling", () => {
     expect(compactInkPoints(source)).toEqual(source);
   });
 
+  it("keeps the exact final nib position after a subpixel stabilizer tail", () => {
+    const source = [point(0, 0), point(10, 2), point(10.0004, 2.0003)];
+    expect(compactInkPoints(source).at(-1)).toEqual(source.at(-1));
+  });
+
   it("suppresses slow hand jitter while remaining responsive at speed", () => {
     const slow = createInkStabilizer(0.8);
     const slowResult = [0, 1, -1, 1, -1].map((y, index) =>
@@ -60,11 +65,50 @@ describe("ink sampling", () => {
     expect(filteredNoise).toBeLessThan(rawNoise * 0.95);
   });
 
-  it("does not shorten a fast straight gesture at full stabilization", () => {
+  it("keeps a fast straight gesture responsive and finishes at the nib", () => {
     const stabilizer = createInkStabilizer(1);
     stabilizer.push(point(0, 0, 0.5, 0));
-    const result = stabilizer.push(point(100, 0.8, 0.5, 8));
-    expect(result.x).toBeGreaterThan(98);
-    expect(Math.abs(result.y)).toBeLessThan(0.8);
+    const live = stabilizer.push(point(100, 0.8, 0.5, 8));
+    expect(live.x).toBeGreaterThan(80);
+    expect(Math.abs(live.y)).toBeLessThan(0.8);
+    const finished = stabilizer.finish();
+    expect(finished.length).toBeGreaterThan(2);
+    expect(finished.at(-1)).toMatchObject({ x: 100, y: 0.8, pressure: 0.5 });
+  });
+
+  it("drains the slow-sample window without overshooting the endpoint", () => {
+    const stabilizer = createInkStabilizer(0.9, { zoom: 2 });
+    stabilizer.push(point(0, 0, 0.2, 0));
+    stabilizer.push(point(12, 4, 0.8, 16));
+    stabilizer.push(point(18, 9, 0.9, 32));
+    const tail = stabilizer.finish();
+
+    expect(tail.length).toBeGreaterThan(0);
+    expect(tail.every((sample) => sample.x <= 18.001 && sample.y <= 9.001)).toBe(true);
+    expect(tail.at(-1)).toMatchObject({ x: 18, y: 9, pressure: 0.9 });
+    expect(stabilizer.finish()).toEqual([]);
+  });
+
+  it("smooths pressure and tilt sensors along with position", () => {
+    const stabilizer = createInkStabilizer(1);
+    stabilizer.push({ ...point(0, 0, 0.1, 0), tiltX: 0, tiltY: 0 });
+    const filtered = stabilizer.push({ ...point(1, 0, 1, 8), tiltX: 60, tiltY: -40 });
+    expect(filtered.pressure).toBeGreaterThan(0.1);
+    expect(filtered.pressure).toBeLessThan(1);
+    expect(filtered.tiltX).toBeGreaterThan(0);
+    expect(filtered.tiltX).toBeLessThan(60);
+  });
+
+  it("keeps stabilization strength stable across zoom levels", () => {
+    const normal = createInkStabilizer(0.7, { zoom: 1 });
+    const zoomed = createInkStabilizer(0.7, { zoom: 2 });
+    let normalPoint = point(0, 0);
+    let zoomedPoint = point(0, 0);
+    for (let index = 0; index < 12; index++) {
+      normalPoint = normal.push(point(index * 2, index % 2 ? 0.8 : -0.8, 0.5, index * 8));
+      zoomedPoint = zoomed.push(point(index, index % 2 ? 0.4 : -0.4, 0.5, index * 8));
+    }
+    expect(zoomedPoint.x * 2).toBeCloseTo(normalPoint.x, 5);
+    expect(zoomedPoint.y * 2).toBeCloseTo(normalPoint.y, 5);
   });
 });
