@@ -15,7 +15,8 @@ const result = spawnSync("pnpm", ["--dir", "../web", command], {
   shell: process.platform === "win32",
   env: {
     ...process.env,
-    VITE_API_URL: process.env.NOTYLO_DESKTOP_API_URL ?? "https://notes.alexistb.com/api"
+    VITE_API_URL: process.env.NOTYLO_DESKTOP_API_URL ?? "https://notes.alexistb.com/api",
+    VITE_TAURI_BUILD: "true"
   }
 });
 
