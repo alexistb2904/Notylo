@@ -13,9 +13,8 @@ export interface BrushDab {
   readonly index: number;
 }
 
-interface GeometryCache {
+interface GeometryProgress {
   readonly recipe: string;
-  readonly layers: Map<number, Path2D>;
   count: number;
   last?: InkPoint;
   distanceToNext: number;
@@ -23,7 +22,16 @@ interface GeometryCache {
   completed: boolean;
 }
 
+interface GeometryCache extends GeometryProgress {
+  readonly layers: Map<number, Path2D>;
+}
+
+interface GeometryLayers {
+  readonly layers: Map<number, Path2D>;
+}
+
 const geometryCache = new WeakMap<object, GeometryCache>();
+const incrementalCache = new WeakMap<object, GeometryProgress>();
 const ALPHA_LEVELS = 16;
 
 /** Distance-resampled dabs, independent from pointer event frequency. */
@@ -67,11 +75,54 @@ export function drawBrushStroke(
 ): void {
   if (!object.points.length) return;
   const geometry = compileGeometry(object.points, object.size, object.brush, complete);
+  paintLayers(context, geometry.layers, object, offset, alpha);
+}
+
+/**
+ * Paints only the dabs introduced since the previous call for this points array.
+ * The live canvas keeps its pixels, making the cost of a frame proportional to
+ * the new pointer samples instead of the complete stroke length.
+ */
+export function drawBrushStrokeIncremental(
+  context: CanvasRenderingContext2D,
+  object: BrushStroke,
+  offset: Point = { x: 0, y: 0 }
+): number {
+  if (!object.points.length) return 0;
+  const recipe = recipeKey(object.size, object.brush);
+  const cacheKey = object.points as object;
+  let progress = incrementalCache.get(cacheKey);
+  if (!progress || progress.recipe !== recipe || progress.count > object.points.length) {
+    progress = createProgress(recipe, object.size, object.brush);
+    incrementalCache.set(cacheKey, progress);
+  }
+  const delta: GeometryLayers = { layers: new Map() };
+  const added = appendGeometry(delta, progress, object.points, object.size, object.brush, false);
+  if (added) paintLayers(context, delta.layers, object, offset, 1);
+  return added;
+}
+
+export function resetIncrementalBrushStroke(points: readonly InkPoint[]): void {
+  incrementalCache.delete(points as object);
+}
+
+/** Drops the temporary Path2D once a finalized stroke has been rasterized. */
+export function releaseBrushStrokeGeometry(points: readonly InkPoint[]): void {
+  geometryCache.delete(points as object);
+}
+
+function paintLayers(
+  context: CanvasRenderingContext2D,
+  layers: ReadonlyMap<number, Path2D>,
+  object: BrushStroke,
+  offset: Point,
+  alpha: number
+): void {
   context.save();
   context.translate(offset.x, offset.y);
   context.fillStyle = object.color;
   context.globalCompositeOperation = object.brush.blendMode === "normal" ? "source-over" : "multiply";
-  const levels = [...geometry.layers.entries()].sort(([a], [b]) => a - b);
+  const levels = [...layers.entries()].sort(([a], [b]) => a - b);
   for (const [level, path] of levels) {
     context.globalAlpha = (level / (ALPHA_LEVELS - 1)) * object.opacity * alpha;
     context.fill(path);
@@ -90,51 +141,74 @@ function compileGeometry(
   let cache = geometryCache.get(cacheKey);
   if (!cache || cache.recipe !== recipe || cache.count > points.length || (cache.completed && cache.count < points.length)) {
     cache = {
-      recipe,
+      ...createProgress(recipe, size, brush),
       layers: new Map(),
-      count: 0,
-      distanceToNext: dabSpacing(size, brush),
-      dabIndex: 0,
-      completed: false
     };
     geometryCache.set(cacheKey, cache);
   }
 
-  if (cache.count === 0 && points[0]) {
-    addDab(cache, makeDab(points[0], points[0], size, brush, cache.dabIndex++), brush);
-    cache.last = points[0];
-    cache.count = 1;
-  }
-
-  const spacing = dabSpacing(size, brush);
-  for (let index = cache.count; index < points.length; index++) {
-    const target = points[index]!;
-    let cursor = cache.last ?? target;
-    let remaining = distance(cursor, target);
-    while (remaining >= cache.distanceToNext && remaining > 1e-9) {
-      const sample = interpolate(cursor, target, cache.distanceToNext / remaining);
-      addDab(cache, makeDab(sample, cursor, size, brush, cache.dabIndex++), brush);
-      cursor = sample;
-      remaining = distance(cursor, target);
-      cache.distanceToNext = spacing;
-    }
-    cache.distanceToNext -= remaining;
-    cache.last = target;
-    cache.count = index + 1;
-  }
-
-  if (complete && !cache.completed && cache.last) {
-    addDab(
-      cache,
-      makeDab(cache.last, points.at(-2) ?? cache.last, size, brush, cache.dabIndex++),
-      brush
-    );
-    cache.completed = true;
-  }
+  appendGeometry(cache, cache, points, size, brush, complete);
   return cache;
 }
 
-function addDab(cache: GeometryCache, dab: BrushDab, brush: InkBrush): void {
+function createProgress(recipe: string, size: number, brush: InkBrush): GeometryProgress {
+  return {
+    recipe,
+    count: 0,
+    distanceToNext: dabSpacing(size, brush),
+    dabIndex: 0,
+    completed: false
+  };
+}
+
+function appendGeometry(
+  geometry: GeometryLayers,
+  progress: GeometryProgress,
+  points: readonly InkPoint[],
+  size: number,
+  brush: InkBrush,
+  complete: boolean
+): number {
+  let added = 0;
+
+  if (progress.count === 0 && points[0]) {
+    addDab(geometry, makeDab(points[0], points[0], size, brush, progress.dabIndex++), brush);
+    progress.last = points[0];
+    progress.count = 1;
+    added++;
+  }
+
+  const spacing = dabSpacing(size, brush);
+  for (let index = progress.count; index < points.length; index++) {
+    const target = points[index]!;
+    let cursor = progress.last ?? target;
+    let remaining = distance(cursor, target);
+    while (remaining >= progress.distanceToNext && remaining > 1e-9) {
+      const sample = interpolate(cursor, target, progress.distanceToNext / remaining);
+      addDab(geometry, makeDab(sample, cursor, size, brush, progress.dabIndex++), brush);
+      added++;
+      cursor = sample;
+      remaining = distance(cursor, target);
+      progress.distanceToNext = spacing;
+    }
+    progress.distanceToNext -= remaining;
+    progress.last = target;
+    progress.count = index + 1;
+  }
+
+  if (complete && !progress.completed && progress.last) {
+    addDab(
+      geometry,
+      makeDab(progress.last, points.at(-2) ?? progress.last, size, brush, progress.dabIndex++),
+      brush
+    );
+    progress.completed = true;
+    added++;
+  }
+  return added;
+}
+
+function addDab(cache: GeometryLayers, dab: BrushDab, brush: InkBrush): void {
   if (brush.tip === "graphite") {
     addEllipse(cache, dab, brush, 1, dab.opacity * 0.28, 0, 0);
     const particles = 3 + Math.round(brush.grain * 5);
@@ -177,7 +251,7 @@ function addDab(cache: GeometryCache, dab: BrushDab, brush: InkBrush): void {
 }
 
 function addEllipse(
-  cache: GeometryCache,
+  cache: GeometryLayers,
   dab: BrushDab,
   brush: InkBrush,
   scale: number,

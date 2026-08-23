@@ -50,4 +50,21 @@ describe("ink sampling", () => {
     const fastResult = fast.push(point(80, 0, 0.5, 8));
     expect(fastResult.x).toBeGreaterThan(65);
   });
+
+  it("keeps a small anti-jitter floor at zero percent", () => {
+    const stabilizer = createInkStabilizer(0);
+    const raw = [0, 1, -1, 1, -1, 1, -1];
+    const result = raw.map((y, index) => stabilizer.push(point(index * 2, y, 0.5, index * 8)));
+    const rawNoise = raw.slice(1).reduce((total, y) => total + Math.abs(y), 0);
+    const filteredNoise = result.slice(1).reduce((total, sample) => total + Math.abs(sample.y), 0);
+    expect(filteredNoise).toBeLessThan(rawNoise * 0.95);
+  });
+
+  it("does not shorten a fast straight gesture at full stabilization", () => {
+    const stabilizer = createInkStabilizer(1);
+    stabilizer.push(point(0, 0, 0.5, 0));
+    const result = stabilizer.push(point(100, 0.8, 0.5, 8));
+    expect(result.x).toBeGreaterThan(98);
+    expect(Math.abs(result.y)).toBeLessThan(0.8);
+  });
 });

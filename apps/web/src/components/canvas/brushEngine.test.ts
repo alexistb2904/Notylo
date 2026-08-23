@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { InkBrush, InkPoint } from "@notylo/document-model";
-import { sampleBrushStroke } from "./brushEngine";
+import { drawBrushStrokeIncremental, sampleBrushStroke } from "./brushEngine";
 
 const brush = (overrides: Partial<InkBrush> = {}): InkBrush => ({
   id: "test",
@@ -61,4 +61,41 @@ describe("stamp-mask brush engine", () => {
     const recipe = brush({ tip: "graphite", scatter: 0.2, grain: 0.8 });
     expect(sampleBrushStroke(line(8), 5, recipe)).toEqual(sampleBrushStroke(line(8), 5, recipe));
   });
+
+  it("renders only newly appended dabs on the live surface", () => {
+    class FakePath2D {
+      moveTo() {}
+      ellipse() {}
+      closePath() {}
+    }
+    vi.stubGlobal("Path2D", FakePath2D);
+    const fills: unknown[] = [];
+    const context = {
+      save() {},
+      restore() {},
+      translate() {},
+      fill(path: unknown) { fills.push(path); },
+      fillStyle: "",
+      globalAlpha: 1,
+      globalCompositeOperation: "source-over"
+    } as unknown as CanvasRenderingContext2D;
+    const points = line(3);
+    const stroke = { points, size: 4, color: "#111", opacity: 1, brush: brush() };
+
+    const initialDabs = drawBrushStrokeIncremental(context, stroke);
+    expect(initialDabs).toBeGreaterThan(100);
+    fills.length = 0;
+    expect(drawBrushStrokeIncremental(context, stroke)).toBe(0);
+    expect(fills).toHaveLength(0);
+
+    points.push(pointAt(120, 0, 24));
+    const appendedDabs = drawBrushStrokeIncremental(context, stroke);
+    expect(appendedDabs).toBeGreaterThan(0);
+    expect(appendedDabs).toBeLessThan(initialDabs);
+    vi.unstubAllGlobals();
+  });
 });
+
+function pointAt(x: number, y: number, timestamp: number): InkPoint {
+  return { x, y, pressure: 0.5, timestamp };
+}

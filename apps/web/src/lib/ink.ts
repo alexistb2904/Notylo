@@ -32,7 +32,9 @@ export interface InkStabilizer {
  * Filtering happens once during capture, so live and committed geometry cannot diverge.
  */
 export function createInkStabilizer(amount: number): InkStabilizer {
-  const strength = clamp01(amount);
+  // Even 0% removes raw sensor chatter; the slider controls the additional
+  // calligraphic stabilization rather than switching filtering off entirely.
+  const strength = 0.18 + clamp01(amount) * 0.74;
   let previousRaw: InkPoint | undefined;
   let filtered: InkPoint | undefined;
   let velocityX = 0;
@@ -40,7 +42,7 @@ export function createInkStabilizer(amount: number): InkStabilizer {
 
   return {
     push(point) {
-      if (!previousRaw || !filtered || strength <= 0.001) {
+      if (!previousRaw || !filtered) {
         previousRaw = point;
         filtered = { ...point };
         return filtered;
@@ -49,18 +51,32 @@ export function createInkStabilizer(amount: number): InkStabilizer {
       const dt = sampleDeltaSeconds(previousRaw.timestamp, point.timestamp);
       const rawVelocityX = (point.x - previousRaw.x) / dt;
       const rawVelocityY = (point.y - previousRaw.y) / dt;
-      const velocityAlpha = 0.28 + (1 - strength) * 0.34;
+      const velocityAlpha = mix(0.55, 0.16, strength);
       velocityX = mix(velocityX, rawVelocityX, velocityAlpha);
       velocityY = mix(velocityY, rawVelocityY, velocityAlpha);
       const speed = Math.hypot(velocityX, velocityY);
 
-      const quietAlpha = mix(0.84, 0.24, strength);
-      const speedResponse = Math.min(0.68, speed / 1_250) * strength;
-      const positionAlpha = clamp(quietAlpha + speedResponse, 0.2, 1);
-      const sensorAlpha = mix(0.72, 0.3, strength);
+      const deltaX = point.x - filtered.x;
+      const deltaY = point.y - filtered.y;
+      const directionLength = Math.hypot(velocityX, velocityY);
+      const directionX = directionLength > 0.001 ? velocityX / directionLength : 1;
+      const directionY = directionLength > 0.001 ? velocityY / directionLength : 0;
+      const parallel = deltaX * directionX + deltaY * directionY;
+      const perpendicularX = deltaX - parallel * directionX;
+      const perpendicularY = deltaY - parallel * directionY;
+
+      // Follow the direction of travel almost immediately, while filtering the
+      // side-to-side component that makes handwriting look shaky.
+      const parallelAlpha = clamp(0.94 + speed / 5_000, 0.94, 0.995);
+      const perpendicularAlpha = clamp(
+        mix(0.94, 0.3, strength) + Math.min(0.15, speed / 3_000) * strength,
+        0.28,
+        0.94
+      );
+      const sensorAlpha = mix(0.74, 0.36, strength);
       filtered = {
-        x: mix(filtered.x, point.x, positionAlpha),
-        y: mix(filtered.y, point.y, positionAlpha),
+        x: filtered.x + directionX * parallel * parallelAlpha + perpendicularX * perpendicularAlpha,
+        y: filtered.y + directionY * parallel * parallelAlpha + perpendicularY * perpendicularAlpha,
         pressure: mix(filtered.pressure, clamp01(point.pressure), sensorAlpha),
         tiltX: mix(filtered.tiltX ?? 0, point.tiltX ?? 0, sensorAlpha),
         tiltY: mix(filtered.tiltY ?? 0, point.tiltY ?? 0, sensorAlpha),

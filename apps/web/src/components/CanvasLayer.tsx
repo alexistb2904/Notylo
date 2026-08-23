@@ -1,8 +1,12 @@
 import { useEffect, useRef } from "react";
-import { drawBrushStroke } from "./canvas/brushEngine";
+import {
+  drawBrushStroke,
+  drawBrushStrokeIncremental,
+  resetIncrementalBrushStroke
+} from "./canvas/brushEngine";
 import { drawOverlay } from "./canvas/drawOverlay";
 import { drawShape } from "./canvas/drawShape";
-import type { CanvasLayerProps } from "./canvas/types";
+import type { CanvasDraftInk, CanvasLayerProps } from "./canvas/types";
 import { InkObjectLayer } from "./InkObjectLayer";
 import { VectorObjectLayer } from "./VectorObjectLayer";
 
@@ -18,6 +22,9 @@ export function CanvasLayer(props: CanvasLayerProps) {
     const overlay = overlayCanvas.current;
     if (!live || !overlay) return;
     let frame = 0;
+    let activePoints: CanvasDraftInk["points"] | undefined;
+    let liveViewKey = "";
+    let renderingStraightLine = false;
 
     const render = () => {
       const parent = live.parentElement;
@@ -25,18 +32,18 @@ export function CanvasLayer(props: CanvasLayerProps) {
       const width = parent.clientWidth;
       const height = parent.clientHeight;
       const dpr = renderDpr(width, height);
-      prepareCanvas(live, width, height, dpr);
+      const liveResized = prepareCanvas(live, width, height, dpr);
       prepareCanvas(overlay, width, height, dpr);
       const liveContext = live.getContext("2d");
       const overlayContext = overlay.getContext("2d");
       if (!liveContext || !overlayContext) return;
-      resetCanvas(liveContext, live, dpr);
       resetCanvas(overlayContext, overlay, dpr);
 
       const camera = props.cameraRef.current;
       const activeOffset = props.activePageId ? (props.pageOffsets?.[props.activePageId] ?? 0) : 0;
-      applyWorldTransform(liveContext, props.origin.x, props.origin.y, camera.x, camera.y, camera.zoom);
       const draft = props.draftRef.current;
+      const nextViewKey = [width, height, dpr, props.origin.x, props.origin.y,
+        camera.x, camera.y, camera.zoom, activeOffset].join(":");
       if (draft?.points.length) {
         const stroke = {
           points: draft.points,
@@ -46,6 +53,9 @@ export function CanvasLayer(props: CanvasLayerProps) {
           opacity: 1
         };
         if (draft.straightLine) {
+          clearCanvas(liveContext, live, dpr);
+          setWorldTransform(liveContext, dpr, props.origin.x, props.origin.y,
+            camera.x, camera.y, camera.zoom);
           const progress = Math.min(1, (performance.now() - draft.straightLine.startedAt) / 180);
           drawBrushStroke(liveContext, stroke, { x: 0, y: activeOffset }, false, 1 - progress);
           drawBrushStroke(
@@ -55,10 +65,29 @@ export function CanvasLayer(props: CanvasLayerProps) {
             false,
             progress
           );
+          renderingStraightLine = true;
+          activePoints = draft.points;
         } else {
-          drawBrushStroke(liveContext, stroke, { x: 0, y: activeOffset }, false);
+          const needsReplay = liveResized || renderingStraightLine || activePoints !== draft.points ||
+            liveViewKey !== nextViewKey;
+          if (needsReplay) {
+            if (activePoints) resetIncrementalBrushStroke(activePoints);
+            resetIncrementalBrushStroke(draft.points);
+            clearCanvas(liveContext, live, dpr);
+          }
+          setWorldTransform(liveContext, dpr, props.origin.x, props.origin.y,
+            camera.x, camera.y, camera.zoom);
+          drawBrushStrokeIncremental(liveContext, stroke, { x: 0, y: activeOffset });
+          renderingStraightLine = false;
+          activePoints = draft.points;
         }
+      } else {
+        if (activePoints) resetIncrementalBrushStroke(activePoints);
+        clearCanvas(liveContext, live, dpr);
+        activePoints = undefined;
+        renderingStraightLine = false;
       }
+      liveViewKey = nextViewKey;
 
       applyWorldTransform(overlayContext, props.origin.x, props.origin.y, camera.x, camera.y, camera.zoom);
       if (props.shapeDraftRef.current)
@@ -108,19 +137,43 @@ export function CanvasLayer(props: CanvasLayerProps) {
   );
 }
 
-function prepareCanvas(canvas: HTMLCanvasElement, width: number, height: number, dpr: number): void {
+function prepareCanvas(canvas: HTMLCanvasElement, width: number, height: number, dpr: number): boolean {
   const targetWidth = Math.max(1, Math.round(width * dpr));
   const targetHeight = Math.max(1, Math.round(height * dpr));
-  if (canvas.width === targetWidth && canvas.height === targetHeight) return;
+  if (canvas.width === targetWidth && canvas.height === targetHeight) return false;
   canvas.width = targetWidth;
   canvas.height = targetHeight;
   canvas.style.width = `${width}px`;
   canvas.style.height = `${height}px`;
+  return true;
 }
 function resetCanvas(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, dpr: number): void {
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function clearCanvas(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, dpr: number): void {
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function setWorldTransform(
+  context: CanvasRenderingContext2D,
+  dpr: number,
+  originX: number,
+  originY: number,
+  cameraX: number,
+  cameraY: number,
+  zoom: number
+): void {
+  context.setTransform(
+    dpr * zoom,
+    0,
+    0,
+    dpr * zoom,
+    dpr * (originX + cameraX),
+    dpr * (originY + cameraY)
+  );
 }
 function applyWorldTransform(
   context: CanvasRenderingContext2D,
