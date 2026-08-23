@@ -7,6 +7,7 @@ import {
   getInkVisual,
   getPressureMaskSegments,
   stabilizeInkPoints,
+  stabilizeInkTrajectory,
   streamlineScaleForCapture
 } from "./inkVector";
 
@@ -143,14 +144,28 @@ describe("note-taking vector ink engine", () => {
     expect(heavy).not.toBe(light);
   });
 
-  it("maps legacy brush ids into the three supported note styles", () => {
+  it("maps every brush preset to its own renderer profile", () => {
     expect(getInkBrushKind(makeInk([0.5], false, "ink-fineliner"))).toBe("ink");
-    expect(getInkBrushKind(makeInk([0.5], false, "ink-calligraphy"))).toBe("ink");
-    expect(getInkBrushKind(makeInk([0.5], false, "marker-medium"))).toBe("ink");
-    expect(getInkBrushKind(makeInk([0.5], false, "wet-paint"))).toBe("ink");
+    expect(getInkBrushKind(makeInk([0.5], false, "ink-calligraphy"))).toBe("nib");
+    expect(getInkBrushKind(makeInk([0.5], false, "marker-medium"))).toBe("marker");
+    expect(getInkBrushKind(makeInk([0.5], false, "wet-paint"))).toBe("paint");
     expect(getInkBrushKind(makeInk([0.5], false, "pencil-sketch"))).toBe("graphite");
-    expect(getInkBrushKind(makeInk([0.5], false, "pencil-2b"))).toBe("graphite");
+    expect(getInkBrushKind(makeInk([0.5], false, "pencil-2b"))).toBe("graphite-soft");
     expect(getInkBrushKind(makeInk([0.5], false, "highlighter-flat"))).toBe("highlighter");
+  });
+
+  it("removes a local trajectory wobble while retaining the exact endpoints", () => {
+    const source = [
+      { x: 0, y: 0, pressure: 0.5, timestamp: 0 },
+      { x: 10, y: 0, pressure: 0.5, timestamp: 8 },
+      { x: 20, y: 7, pressure: 0.5, timestamp: 16 },
+      { x: 30, y: 0, pressure: 0.5, timestamp: 24 },
+      { x: 40, y: 0, pressure: 0.5, timestamp: 32 }
+    ];
+    const stabilized = stabilizeInkTrajectory(source, 0.8);
+    expect(stabilized[0]).toMatchObject({ x: 0, y: 0 });
+    expect(stabilized.at(-1)).toMatchObject({ x: 40, y: 0 });
+    expect(stabilized[2]!.y).toBeLessThan(source[2]!.y);
   });
 
   it("makes pen pencil and highlighter genuinely different", () => {

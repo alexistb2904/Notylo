@@ -7,6 +7,7 @@ import { ProfilePage } from "./pages/ProfilePage";
 import { AuthDialog } from "./components/AuthDialog";
 import { useAuth } from "./lib/auth";
 import { PublicPage } from "./pages/PublicPage";
+import { DesktopPasskeyPage } from "./pages/DesktopPasskeyPage";
 import { t } from "./i18n";
 
 const authRequired = ["true", "1", "yes"].includes(
@@ -23,6 +24,7 @@ export function App() {
         <Route path="/debug/benchmark" element={<BenchmarkPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/public/:token" element={<PublicPage />} />
+        <Route path="/desktop/passkey" element={<DesktopPasskeyPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AccessGate>
@@ -33,8 +35,9 @@ function AccessGate({ children }: { readonly children: React.ReactNode }) {
   const { ready, user, hasOfflineAccess } = useAuth();
   const location = useLocation();
   const isPublicShare = location.pathname.startsWith("/public/");
+  const isDesktopPasskey = location.pathname === "/desktop/passkey";
 
-  if (isPublicShare) return children;
+  if (isPublicShare || isDesktopPasskey) return children;
 
   if (!authRequired || !ready) {
     if (!ready) {

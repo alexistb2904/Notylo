@@ -149,6 +149,10 @@ export interface MathObject extends BaseObject {
   readonly type: "math";
   readonly latex: string;
   readonly displayMode: boolean;
+  /** Optional so notebooks created before equation typography remain readable. */
+  readonly fontFamily?: string;
+  /** Rendered equation size in document pixels. */
+  readonly fontSize?: number;
   readonly color: string;
 }
 

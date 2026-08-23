@@ -1,4 +1,5 @@
 import katex from "katex";
+import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import type { DocumentObject } from "@notylo/document-model";
 import type { DOMObjectUpdate } from "./types";
@@ -16,6 +17,14 @@ export function MathCard({
   const [editing, setEditing] = useState(false);
   const [latex, setLatex] = useState(object.latex);
   useEffect(() => setLatex(object.latex), [object.latex]);
+  const fontFamily = object.fontFamily ?? "Newsreader, serif";
+  const fontSize = object.fontSize ?? 22;
+  const formulaStyle = {
+    color: object.color,
+    fontFamily,
+    fontSize,
+    "--equation-font-family": fontFamily
+  } as CSSProperties;
   if (editing)
     return (
       <textarea
@@ -34,7 +43,9 @@ export function MathCard({
   try {
     return (
       <button
+        type="button"
         className="math-object"
+        style={formulaStyle}
         onDoubleClick={() => {
           if (!readOnly) setEditing(true);
         }}
@@ -50,7 +61,9 @@ export function MathCard({
   } catch {
     return (
       <button
+        type="button"
         className="math-object math-error"
+        style={formulaStyle}
         onDoubleClick={() => {
           if (!readOnly) setEditing(true);
         }}

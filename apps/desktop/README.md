@@ -27,6 +27,17 @@ Le serveur public doit conserver son origine web dans `CORS_ORIGIN` et autorise
 `http://tauri.localhost`). Si le cloud est indisponible, l'accès hors-ligne
 reste disponible et les carnets locaux ne sont pas bloqués.
 
+## Passkeys
+
+Les passkeys ne sont pas exécutées dans la WebView Tauri : l'application ouvre
+le navigateur système sur l'origine HTTPS de Notylo, puis revient dans le
+programme via `notylo://auth`. L'application doit donc rester ouverte pendant
+l'opération. Côté API, configurez `DESKTOP_PASSKEY_URL` avec
+`https://VOTRE_WEB/desktop/passkey`, exactement sur la même origine que
+`WEBAUTHN_ORIGIN`. Le lien de retour ne contient ni jeton de session ni jeton
+de rafraîchissement : il ne transporte qu'un code à usage unique, valable cinq
+minutes.
+
 Pour générer l'installateur NSIS Windows :
 
 ```powershell

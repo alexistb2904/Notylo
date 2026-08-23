@@ -27,6 +27,13 @@
       "csp": "default-src 'self'; img-src 'self' asset: http: https: data: blob:; media-src 'self' http: https: data: blob:; connect-src 'self' http: https: ws: wss:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self' blob:; script-src 'self'"
     }
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["notylo"]
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis", "appimage", "deb"],

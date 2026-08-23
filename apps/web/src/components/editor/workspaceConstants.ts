@@ -1,14 +1,22 @@
 import { Circle, RectangleHorizontal, Square, Triangle, Waypoints } from "lucide-react";
-import type { ShapeObject } from "@notylo/document-model";
+import type { InkDynamics, ShapeObject } from "@notylo/document-model";
 import { t } from "../../i18n";
 
 export const DEFAULT_COLORS = ["#292927", "#2764d9", "#d4433d", "#258a57", "#d1a510"];
 
-/**
- * Notylo is a note-taking app, not a paint program. Keep three deliberately
- * different writing tools instead of pretending to provide a large brush engine.
- * Legacy brush ids remain supported by the renderer for existing notebooks.
- */
+const PRESSURE_WIDTH: InkDynamics = {
+  pressureSensitivity: 0.5,
+  pressureAffectsWidth: true,
+  pressureAffectsOpacity: false,
+  tiltAffectsAngle: false
+};
+
+const PRESSURE_OPACITY: InkDynamics = {
+  ...PRESSURE_WIDTH,
+  pressureAffectsOpacity: true
+};
+
+/** Each preset carries its own dynamics, so choosing a brush always gives a useful result. */
 export const BRUSHES = [
   {
     id: "ink-fineliner",
@@ -16,8 +24,19 @@ export const BRUSHES = [
     detail: t("brush.penDetail"),
     size: 2.4,
     tool: "pen" as const,
-    smoothing: 0.46,
-    texture: "ink"
+    smoothing: 0.58,
+    texture: "ink",
+    dynamics: PRESSURE_WIDTH
+  },
+  {
+    id: "ink-calligraphy",
+    name: t("brush.calligraphy"),
+    detail: t("brush.calligraphyDetail"),
+    size: 4.8,
+    tool: "pen" as const,
+    smoothing: 0.72,
+    texture: "nib",
+    dynamics: PRESSURE_OPACITY
   },
   {
     id: "pencil-sketch",
@@ -25,8 +44,44 @@ export const BRUSHES = [
     detail: t("brush.pencilDetail"),
     size: 3.2,
     tool: "pencil" as const,
-    smoothing: 0.34,
-    texture: "graphite"
+    smoothing: 0.56,
+    texture: "graphite",
+    dynamics: { ...PRESSURE_OPACITY, tiltAffectsAngle: true }
+  },
+  {
+    id: "pencil-2b",
+    name: t("brush.softPencil"),
+    detail: t("brush.softPencilDetail"),
+    size: 5.2,
+    tool: "pencil" as const,
+    smoothing: 0.68,
+    texture: "graphite-soft",
+    dynamics: { ...PRESSURE_OPACITY, tiltAffectsAngle: true }
+  },
+  {
+    id: "marker-medium",
+    name: t("brush.marker"),
+    detail: t("brush.markerDetail"),
+    size: 8.5,
+    tool: "pen" as const,
+    smoothing: 0.78,
+    texture: "marker",
+    dynamics: {
+      pressureSensitivity: 0.5,
+      pressureAffectsWidth: false,
+      pressureAffectsOpacity: true,
+      tiltAffectsAngle: false
+    }
+  },
+  {
+    id: "wet-paint",
+    name: t("brush.paint"),
+    detail: t("brush.paintDetail"),
+    size: 7.5,
+    tool: "pen" as const,
+    smoothing: 0.74,
+    texture: "paint",
+    dynamics: PRESSURE_OPACITY
   },
   {
     id: "highlighter-flat",
@@ -34,8 +89,14 @@ export const BRUSHES = [
     detail: t("brush.highlighterDetail"),
     size: 4.5,
     tool: "highlighter" as const,
-    smoothing: 0.4,
-    texture: "highlighter"
+    smoothing: 0.64,
+    texture: "highlighter",
+    dynamics: {
+      pressureSensitivity: 0.5,
+      pressureAffectsWidth: false,
+      pressureAffectsOpacity: false,
+      tiltAffectsAngle: false
+    }
   }
 ] as const;
 

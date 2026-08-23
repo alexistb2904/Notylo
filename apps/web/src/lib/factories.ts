@@ -83,7 +83,10 @@ export function newMath(input: ObjectBaseInput & { latex?: string }): MathObject
     type: "math",
     latex: input.latex ?? "x^2",
     displayMode: true,
-    color: "#292927"
+    fontFamily: "Newsreader, serif",
+    fontSize: 22,
+    // A distinct ink blue keeps equations readable while separating them from body text.
+    color: "#24507a"
   };
 }
 export function newShape(input: ObjectBaseInput & { shape?: ShapeObject["shape"] }): ShapeObject {

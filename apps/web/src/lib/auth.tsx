@@ -4,10 +4,11 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode
 } from "react";
-import { api, ApiError, type Account, type AuthResponse } from "./api";
+import { api, ApiError, isTauri, type Account, type AuthResponse } from "./api";
 import { t } from "../i18n";
 
 type AuthState = {
@@ -20,6 +21,7 @@ type AuthState = {
   login(email: string, password: string): Promise<void>;
   register(email: string, password: string): Promise<void>;
   loginWithPasskey(email?: string): Promise<void>;
+  registerPasskeyWithBrowser(name: string): Promise<void>;
   continueOffline(): void;
   refreshSession(): Promise<boolean>;
   updateUser(user: Account): void;
@@ -35,7 +37,18 @@ type StoredSession = {
 const storageKey = "notylo-auth";
 const offlineAccessKey = "notylo-offline-access";
 const refreshIntervalMs = 10 * 60 * 1000;
+const desktopFlowStorageKey = "notylo-desktop-passkey-flow";
 const AuthContext = createContext<AuthState | undefined>(undefined);
+
+type DesktopPasskeyFlow = {
+  readonly state: string;
+  readonly kind: "login" | "registration";
+};
+type PendingDesktopPasskeyFlow = DesktopPasskeyFlow & {
+  readonly resolve: () => void;
+  readonly reject: (error: unknown) => void;
+  readonly timeout: number;
+};
 
 export function AuthProvider({ children }: { readonly children: ReactNode }) {
   const [user, setUser] = useState<Account>();
@@ -44,6 +57,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   const [hasOfflineAccess, setHasOfflineAccess] = useState(readOfflineAccess);
   const [registrationEnabled, setRegistrationEnabled] = useState(false);
   const [cloudUnavailable, setCloudUnavailable] = useState(false);
+  const desktopFlows = useRef(new Map<string, PendingDesktopPasskeyFlow>());
 
   const store = useCallback((result: AuthResponse) => {
     const session: StoredSession = {
@@ -79,6 +93,98 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     clear();
     if (currentAccessToken) await api.logout(currentAccessToken).catch(() => undefined);
   }, [accessToken, clear]);
+
+  const finishDesktopPasskey = useCallback(
+    async (rawUrl: string) => {
+      let url: URL;
+      try {
+        url = new URL(rawUrl);
+      } catch {
+        return;
+      }
+      if (url.protocol !== "notylo:" || url.hostname !== "auth") return;
+      const state = url.searchParams.get("state") ?? "";
+      const stored = readDesktopPasskeyFlow();
+      if (!stored || stored.state !== state) return;
+      const pending = desktopFlows.current.get(state);
+      const settle = (error?: unknown) => {
+        sessionStorage.removeItem(desktopFlowStorageKey);
+        if (!pending) return;
+        window.clearTimeout(pending.timeout);
+        desktopFlows.current.delete(state);
+        if (error) pending.reject(error);
+        else pending.resolve();
+      };
+      try {
+        if (stored.kind === "login") {
+          const code = url.searchParams.get("code") ?? "";
+          if (!/^[A-Za-z0-9_-]{43,128}$/.test(code)) throw new Error(t("auth.loginFailed"));
+          store(await api.desktopPasskeyLoginExchange(state, code));
+          setCloudUnavailable(false);
+        } else if (url.searchParams.get("registered") !== "1") {
+          throw new Error(t("auth.passkeyCancelled"));
+        }
+        settle();
+      } catch (error) {
+        settle(error);
+      }
+    },
+    [store]
+  );
+
+  useEffect(() => {
+    if (!isTauri) return;
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void import("@tauri-apps/plugin-deep-link")
+      .then(async ({ getCurrent, onOpenUrl }) => {
+        const current = await getCurrent();
+        if (current) await Promise.all(current.map((url) => finishDesktopPasskey(url)));
+        unlisten = await onOpenUrl((urls) => {
+          urls.forEach((url) => void finishDesktopPasskey(url));
+        });
+        if (!active) unlisten();
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, [finishDesktopPasskey]);
+
+  const beginDesktopPasskey = useCallback(
+    async (
+      kind: DesktopPasskeyFlow["kind"],
+      begin: (state: string) => Promise<{ url: string }>
+    ): Promise<void> => {
+      const state = randomDesktopState();
+      const flow: DesktopPasskeyFlow = { state, kind };
+      sessionStorage.setItem(desktopFlowStorageKey, JSON.stringify(flow));
+      const completion = new Promise<void>((resolve, reject) => {
+        const timeout = window.setTimeout(() => {
+          desktopFlows.current.delete(state);
+          sessionStorage.removeItem(desktopFlowStorageKey);
+          reject(new Error(t("auth.loginFailed")));
+        }, 5 * 60_000);
+        desktopFlows.current.set(state, { ...flow, resolve, reject, timeout });
+      });
+      try {
+        const { url } = await begin(state);
+        const { openUrl } = await import("@tauri-apps/plugin-opener");
+        await openUrl(url);
+      } catch (error) {
+        const pending = desktopFlows.current.get(state);
+        if (pending) {
+          window.clearTimeout(pending.timeout);
+          desktopFlows.current.delete(state);
+          sessionStorage.removeItem(desktopFlowStorageKey);
+          pending.reject(error);
+        }
+      }
+      return completion;
+    },
+    []
+  );
 
   const continueOffline = useCallback(() => {
     try {
@@ -176,6 +282,10 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   );
   const loginWithPasskey = useCallback(
     async (email?: string) => {
+      if (isTauri) {
+        await beginDesktopPasskey("login", (state) => api.desktopPasskeyLoginStart(state));
+        return;
+      }
       if (!window.PublicKeyCredential) throw new Error(t("auth.passkeysUnsupported"));
       const { startAuthentication } = await import("@simplewebauthn/browser");
       const normalizedEmail = email?.trim().toLowerCase() || undefined;
@@ -184,7 +294,16 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
       store(await api.passkeyLoginVerify(normalizedEmail, response));
       setCloudUnavailable(false);
     },
-    [store]
+    [beginDesktopPasskey, store]
+  );
+  const registerPasskeyWithBrowser = useCallback(
+    async (name: string) => {
+      if (!isTauri || !accessToken) throw new Error(t("auth.passkeysUnsupported"));
+      await beginDesktopPasskey("registration", (state) =>
+        api.desktopPasskeyRegistrationStart(accessToken, state, name)
+      );
+    },
+    [accessToken, beginDesktopPasskey]
   );
   const updateUser = useCallback((nextUser: Account) => {
     setUser(nextUser);
@@ -203,6 +322,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
       login,
       register,
       loginWithPasskey,
+      registerPasskeyWithBrowser,
       continueOffline,
       refreshSession,
       updateUser,
@@ -218,6 +338,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
       login,
       register,
       loginWithPasskey,
+      registerPasskeyWithBrowser,
       continueOffline,
       refreshSession,
       updateUser,
@@ -263,6 +384,26 @@ function readStoredSession(): StoredSession | undefined {
     };
   } catch {
     sessionStorage.removeItem(storageKey);
+    return undefined;
+  }
+}
+
+function randomDesktopState(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+}
+
+function readDesktopPasskeyFlow(): DesktopPasskeyFlow | undefined {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(desktopFlowStorageKey) ?? "null") as Partial<DesktopPasskeyFlow> | null;
+    return value && typeof value.state === "string" && (value.kind === "login" || value.kind === "registration")
+      ? { state: value.state, kind: value.kind }
+      : undefined;
+  } catch {
     return undefined;
   }
 }

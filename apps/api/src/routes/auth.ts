@@ -24,6 +24,8 @@ import type {
   AccountDeletion,
   ApiContext,
   Credentials,
+  DesktopPasskeyStart,
+  DesktopPasskeyVerification,
   PasskeyLoginOptionsRequest,
   PasskeyLoginVerification,
   PasskeyOptionsRequest,
@@ -304,6 +306,128 @@ export function registerAuthRoutes(context: ApiContext): void {
       }
     }
   );
+  app.post<{ Body: DesktopPasskeyStart }>(
+    "/auth/desktop/passkeys/login/start",
+    { config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } },
+    async (request, reply) => {
+      const state = desktopState(request.body?.state);
+      if (!state) return reply.code(400).send({ error: "Demande de connexion invalide." });
+      try {
+        await startDesktopPasskeySession(pool, state, null, "login");
+        return { url: desktopPasskeyUrl(context, state, "login") };
+      } catch (error) {
+        return databaseFailure(reply, error, app.log.error.bind(app.log));
+      }
+    }
+  );
+  app.post<{ Body: DesktopPasskeyStart }>(
+    "/auth/desktop/passkeys/login/options",
+    { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } },
+    async (request, reply) => {
+      const state = desktopState(request.body?.state);
+      if (!state) return reply.code(400).send({ error: "Demande de connexion invalide." });
+      try {
+        const session = await activeDesktopPasskeySession(pool, state, "login");
+        if (!session) return reply.code(410).send({ error: "La demande de connexion a expiré." });
+        const options = await generateAuthenticationOptions({
+          rpID: context.webauthnRpId,
+          userVerification: "required"
+        });
+        await saveChallenge(pool, null, "authentication", options.challenge, session.state_hash);
+        return options;
+      } catch (error) {
+        return databaseFailure(reply, error, app.log.error.bind(app.log));
+      }
+    }
+  );
+  app.post<{ Body: DesktopPasskeyVerification }>(
+    "/auth/desktop/passkeys/login/verify",
+    { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } },
+    async (request, reply) => {
+      const state = desktopState(request.body?.state);
+      const response = request.body?.response;
+      if (!state || !response || !("id" in response) || !response.id)
+        return reply.code(400).send({ error: "Réponse passkey invalide." });
+      try {
+        const session = await activeDesktopPasskeySession(pool, state, "login");
+        if (!session) return reply.code(410).send({ error: "La demande de connexion a expiré." });
+        const credential = (
+          await pool.query<StoredPasskey>(
+            "SELECT id, user_id, credential_id, public_key, counter, transports, label, device_type, backed_up, created_at, last_used_at FROM webauthn_credentials WHERE credential_id = $1 LIMIT 1",
+            [response.id]
+          )
+        ).rows[0];
+        const challenge = await consumeChallenge(
+          pool,
+          null,
+          "authentication",
+          session.state_hash
+        );
+        if (!challenge || !credential)
+          return reply.code(401).send({ error: "La demande passkey a expiré. Réessayez." });
+        const user = (
+          await pool.query<StoredUser>(
+            "SELECT id, email, password_hash, display_name, session_version FROM users WHERE id = $1 LIMIT 1",
+            [credential.user_id]
+          )
+        ).rows[0];
+        if (!user) return reply.code(401).send({ error: "Cette passkey n’est pas reconnue." });
+        const verification = await verifyAuthenticationResponse({
+          response: response as PasskeyLoginVerification["response"],
+          expectedChallenge: challenge.challenge,
+          expectedOrigin: context.webauthnOrigin,
+          expectedRPID: context.webauthnRpId,
+          requireUserVerification: true,
+          credential: toWebAuthnCredential(credential)
+        });
+        if (!verification.verified)
+          return reply.code(401).send({ error: "Cette passkey n’a pas pu être vérifiée." });
+        await pool.query(
+          "UPDATE webauthn_credentials SET counter = $1, last_used_at = now() WHERE id = $2",
+          [verification.authenticationInfo.newCounter, credential.id]
+        );
+        const code = crypto.randomBytes(32).toString("base64url");
+        const completed = await pool.query(
+          "UPDATE desktop_passkey_sessions SET user_id = $1, code_hash = $2, completed_at = now() WHERE state_hash = $3 AND purpose = 'login' AND completed_at IS NULL AND expires_at > now()",
+          [user.id, desktopTokenHash(code), session.state_hash]
+        );
+        if (!completed.rowCount)
+          return reply.code(410).send({ error: "La demande de connexion a expiré." });
+        return { continueUrl: desktopCallbackUrl(state, { code }) };
+      } catch (error) {
+        app.log.warn(error, "Desktop passkey authentication failed");
+        return reply.code(401).send({ error: "Cette passkey n’a pas pu être vérifiée." });
+      }
+    }
+  );
+  app.post<{ Body: { state?: string; code?: string } }>(
+    "/auth/desktop/passkeys/login/exchange",
+    { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } },
+    async (request, reply) => {
+      const state = desktopState(request.body?.state);
+      const code = desktopCode(request.body?.code);
+      if (!state || !code) return reply.code(400).send({ error: "Retour de connexion invalide." });
+      try {
+        const consumed = await pool.query<{ user_id: string }>(
+          "DELETE FROM desktop_passkey_sessions WHERE state_hash = $1 AND code_hash = $2 AND purpose = 'login' AND completed_at IS NOT NULL AND expires_at > now() RETURNING user_id",
+          [desktopTokenHash(state), desktopTokenHash(code)]
+        );
+        const userId = consumed.rows[0]?.user_id;
+        if (!userId) return reply.code(401).send({ error: "Ce retour de connexion est invalide ou expiré." });
+        const user = (
+          await pool.query<StoredUser>(
+            "SELECT id, email, password_hash, display_name, session_version FROM users WHERE id = $1 LIMIT 1",
+            [userId]
+          )
+        ).rows[0];
+        return user
+          ? issueTokens(context, user)
+          : reply.code(401).send({ error: "La session n’est plus valide." });
+      } catch (error) {
+        return databaseFailure(reply, error, app.log.error.bind(app.log));
+      }
+    }
+  );
   app.post<{ Body: PasskeyOptionsRequest }>(
     "/auth/passkeys/registration/options",
     { preHandler: auth },
@@ -389,6 +513,127 @@ export function registerAuthRoutes(context: ApiContext): void {
         if (isUniqueViolation(error))
           return reply.code(409).send({ error: "Cette passkey est déjà enregistrée." });
         app.log.warn(error, "Passkey registration failed");
+        return reply.code(400).send({ error: "Cette passkey n’a pas pu être vérifiée." });
+      }
+    }
+  );
+  app.post<{ Body: DesktopPasskeyStart }>(
+    "/auth/desktop/passkeys/registration/start",
+    { preHandler: auth, config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } },
+    async (request, reply) => {
+      const state = desktopState(request.body?.state);
+      const label =
+        typeof request.body?.name === "string"
+          ? request.body.name.trim() || "Nouvelle passkey"
+          : "Nouvelle passkey";
+      if (!state || label.length > 80)
+        return reply.code(400).send({ error: "Demande d’enregistrement invalide." });
+      try {
+        await startDesktopPasskeySession(pool, state, request.user.sub, "registration", label);
+        return { url: desktopPasskeyUrl(context, state, "registration") };
+      } catch (error) {
+        return databaseFailure(reply, error, app.log.error.bind(app.log));
+      }
+    }
+  );
+  app.post<{ Body: DesktopPasskeyStart }>(
+    "/auth/desktop/passkeys/registration/options",
+    { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } },
+    async (request, reply) => {
+      const state = desktopState(request.body?.state);
+      if (!state) return reply.code(400).send({ error: "Demande d’enregistrement invalide." });
+      try {
+        const session = await activeDesktopPasskeySession(pool, state, "registration");
+        if (!session?.user_id)
+          return reply.code(410).send({ error: "La demande d’enregistrement a expiré." });
+        const user = (
+          await pool.query<Account>(
+            "SELECT id, email, display_name FROM users WHERE id = $1 LIMIT 1",
+            [session.user_id]
+          )
+        ).rows[0];
+        if (!user) return reply.code(401).send({ error: "La session n’est plus valide." });
+        const credentials = (
+          await pool.query<StoredPasskey>(
+            "SELECT id, user_id, credential_id, public_key, counter, transports, label, device_type, backed_up, created_at, last_used_at FROM webauthn_credentials WHERE user_id = $1",
+            [user.id]
+          )
+        ).rows;
+        const options = await generateRegistrationOptions({
+          rpName: "Notylo",
+          rpID: context.webauthnRpId,
+          userID: Buffer.from(user.id),
+          userName: user.email,
+          userDisplayName: user.display_name,
+          attestationType: "none",
+          excludeCredentials: credentials.map((credential) => ({
+            id: credential.credential_id,
+            transports: credential.transports
+          })),
+          authenticatorSelection: { residentKey: "required", userVerification: "required" }
+        });
+        await saveChallenge(pool, user.id, "registration", options.challenge, session.state_hash);
+        return options;
+      } catch (error) {
+        return databaseFailure(reply, error, app.log.error.bind(app.log));
+      }
+    }
+  );
+  app.post<{ Body: DesktopPasskeyVerification }>(
+    "/auth/desktop/passkeys/registration/verify",
+    { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } },
+    async (request, reply) => {
+      const state = desktopState(request.body?.state);
+      const response = request.body?.response;
+      if (!state || !response || !("id" in response) || !response.id)
+        return reply.code(400).send({ error: "Réponse passkey invalide." });
+      try {
+        const session = await activeDesktopPasskeySession(pool, state, "registration");
+        if (!session?.user_id)
+          return reply.code(410).send({ error: "La demande d’enregistrement a expiré." });
+        const challenge = await consumeChallenge(
+          pool,
+          session.user_id,
+          "registration",
+          session.state_hash
+        );
+        if (!challenge)
+          return reply.code(400).send({ error: "La demande passkey a expiré. Réessayez." });
+        const verification = await verifyRegistrationResponse({
+          response: response as PasskeyVerification["response"],
+          expectedChallenge: challenge.challenge,
+          expectedOrigin: context.webauthnOrigin,
+          expectedRPID: context.webauthnRpId,
+          requireUserVerification: true
+        });
+        if (!verification.verified || !verification.registrationInfo)
+          return reply.code(400).send({ error: "Cette passkey n’a pas pu être vérifiée." });
+        const info = verification.registrationInfo;
+        await pool.query(
+          "INSERT INTO webauthn_credentials (id, user_id, credential_id, public_key, counter, transports, label, device_type, backed_up) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+          [
+            crypto.randomUUID(),
+            session.user_id,
+            info.credential.id,
+            Buffer.from(info.credential.publicKey).toString("base64url"),
+            info.credential.counter,
+            JSON.stringify(info.credential.transports ?? []),
+            session.label ?? "Nouvelle passkey",
+            info.credentialDeviceType,
+            info.credentialBackedUp
+          ]
+        );
+        const completed = await pool.query(
+          "UPDATE desktop_passkey_sessions SET completed_at = now() WHERE state_hash = $1 AND purpose = 'registration' AND completed_at IS NULL AND expires_at > now()",
+          [session.state_hash]
+        );
+        if (!completed.rowCount)
+          return reply.code(410).send({ error: "La demande d’enregistrement a expiré." });
+        return { continueUrl: desktopCallbackUrl(state, { registered: "1" }) };
+      } catch (error) {
+        if (isUniqueViolation(error))
+          return reply.code(409).send({ error: "Cette passkey est déjà enregistrée." });
+        app.log.warn(error, "Desktop passkey registration failed");
         return reply.code(400).send({ error: "Cette passkey n’a pas pu être vérifiée." });
       }
     }
@@ -513,4 +758,64 @@ function issueTokens(context: ApiContext, user: StoredUser) {
     ),
     user: toAccount(user)
   };
+}
+
+type DesktopPasskeyPurpose = "login" | "registration";
+type DesktopPasskeySession = {
+  readonly state_hash: string;
+  readonly user_id: string | null;
+  readonly label: string | null;
+};
+
+function desktopState(value: unknown): string | undefined {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{43,128}$/.test(value) ? value : undefined;
+}
+
+function desktopCode(value: unknown): string | undefined {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{43,128}$/.test(value) ? value : undefined;
+}
+
+function desktopTokenHash(value: string): string {
+  return crypto.createHash("sha256").update(value).digest("base64url");
+}
+
+async function startDesktopPasskeySession(
+  pool: Parameters<typeof saveChallenge>[0],
+  state: string,
+  userId: string | null,
+  purpose: DesktopPasskeyPurpose,
+  label?: string
+): Promise<void> {
+  const stateHash = desktopTokenHash(state);
+  await pool.query("DELETE FROM desktop_passkey_sessions WHERE expires_at < now()");
+  await pool.query(
+    "INSERT INTO desktop_passkey_sessions (state_hash, user_id, purpose, label, expires_at) VALUES ($1, $2, $3, $4, now() + interval '5 minutes')",
+    [stateHash, userId, purpose, label ?? null]
+  );
+}
+
+async function activeDesktopPasskeySession(
+  pool: Parameters<typeof saveChallenge>[0],
+  state: string,
+  purpose: DesktopPasskeyPurpose
+): Promise<DesktopPasskeySession | undefined> {
+  const result = await pool.query<DesktopPasskeySession>(
+    "SELECT state_hash, user_id, label FROM desktop_passkey_sessions WHERE state_hash = $1 AND purpose = $2 AND completed_at IS NULL AND expires_at > now() LIMIT 1",
+    [desktopTokenHash(state), purpose]
+  );
+  return result.rows[0];
+}
+
+function desktopPasskeyUrl(context: ApiContext, state: string, mode: DesktopPasskeyPurpose): string {
+  const url = new URL(context.desktopPasskeyUrl);
+  url.searchParams.set("state", state);
+  url.searchParams.set("mode", mode);
+  return url.toString();
+}
+
+function desktopCallbackUrl(state: string, parameters: Readonly<Record<string, string>>): string {
+  const url = new URL("notylo://auth");
+  url.searchParams.set("state", state);
+  for (const [key, value] of Object.entries(parameters)) url.searchParams.set(key, value);
+  return url.toString();
 }

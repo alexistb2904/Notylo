@@ -23,10 +23,14 @@ interface Props {
   readonly showIcons: boolean;
   readonly iconShape: IconShape;
   readonly brushId: string;
+  readonly size: number;
+  readonly smoothing: number;
   onColor(color: string, index: number): void;
   onPaletteColor(color: string, index: number): void;
   onCloseBrushes(): void;
   onBrush(brush: BrushPreset): void;
+  onSize(size: number): void;
+  onSmoothing(smoothing: number): void;
   onCloseIcons(): void;
   onIcon(shape: IconShape): void;
 }
@@ -43,10 +47,14 @@ export function WorkspaceDrawers({
   showIcons,
   iconShape,
   brushId,
+  size,
+  smoothing,
   onColor,
   onPaletteColor,
   onCloseBrushes,
   onBrush,
+  onSize,
+  onSmoothing,
   onCloseIcons,
   onIcon
 }: Props) {
@@ -231,6 +239,18 @@ export function WorkspaceDrawers({
                 </span>
               </button>
             ))}
+          </div>
+          <div className="brush-controls" aria-label={t("drawer.strokeControls")}>
+            <label>
+              <span>{t("drawer.size")}</span>
+              <output>{size.toFixed(1)} px</output>
+              <input aria-label={t("drawer.size")} type="range" min="0.8" max="32" step="0.2" value={size} onChange={(event) => onSize(Number(event.target.value))} />
+            </label>
+            <label>
+              <span>{t("drawer.stabilizer")}</span>
+              <output>{Math.round(smoothing * 100)}%</output>
+              <input aria-label={t("drawer.stabilizer")} type="range" min="0" max="1" step="0.05" value={smoothing} onChange={(event) => onSmoothing(Number(event.target.value))} />
+            </label>
           </div>
         </div>
       )}

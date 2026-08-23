@@ -4,7 +4,14 @@ import type { Point } from "@notylo/canvas-engine";
 import { stabilizeInkPoints, type RenderInkPoint } from "../../lib/ink";
 
 export type InkRenderQuality = "economy" | "full";
-export type BrushKind = "ink" | "graphite" | "highlighter";
+export type BrushKind =
+  | "ink"
+  | "nib"
+  | "graphite"
+  | "graphite-soft"
+  | "marker"
+  | "paint"
+  | "highlighter";
 
 type RenderPoint = RenderInkPoint;
 type InkLike = Pick<
@@ -60,6 +67,34 @@ const preparedCache = new WeakMap<
 const pathCache = new WeakMap<object, { readonly key: string; readonly path: string }>();
 
 export { stabilizeInkPoints } from "../../lib/ink";
+
+/**
+ * A compact, symmetric trajectory stabilizer. It preserves the live tip
+ * exactly, then settles only the previous samples as more motion arrives.
+ * The result is smooth handwriting without the delayed catch-up of a low-pass filter.
+ */
+export function stabilizeInkTrajectory(
+  points: readonly RenderPoint[],
+  smoothing: number
+): readonly RenderPoint[] {
+  if (points.length < 3 || smoothing <= 0.02) return points.map((point) => ({ ...point }));
+  const blend = Math.min(0.46, Math.max(0, smoothing) * 0.46);
+  const pass = (source: readonly RenderPoint[]) =>
+    source.map((point, index) => {
+      if (index === 0 || index === source.length - 1) return { ...point };
+      const previous = source[index - 1]!;
+      const next = source[index + 1]!;
+      const targetX = previous.x * 0.25 + point.x * 0.5 + next.x * 0.25;
+      const targetY = previous.y * 0.25 + point.y * 0.5 + next.y * 0.25;
+      return {
+        ...point,
+        x: point.x + (targetX - point.x) * blend,
+        y: point.y + (targetY - point.y) * blend
+      };
+    });
+  const firstPass = pass(points);
+  return smoothing >= 0.72 ? pass(firstPass) : firstPass;
+}
 
 /**
  * Resolution-independent vector outline.
@@ -145,13 +180,17 @@ export function drawInkVectorPreview(
 export function getInkBrushKind(object: Pick<InkObject, "brushId" | "tool">): BrushKind {
   switch (object.brushId) {
     case "pencil-sketch":
-    case "pencil-2b":
       return "graphite";
+    case "pencil-2b":
+      return "graphite-soft";
+    case "ink-calligraphy":
+      return "nib";
+    case "marker-medium":
+      return "marker";
+    case "wet-paint":
+      return "paint";
     case "highlighter-flat":
       return "highlighter";
-    case "ink-calligraphy":
-    case "marker-medium":
-    case "wet-paint":
     case "ink-fineliner":
       return object.tool === "pencil"
         ? "graphite"
@@ -172,6 +211,12 @@ export function getInkVisual(object: Pick<InkObject, "brushId" | "tool">): Brush
   switch (kind) {
     case "graphite":
       return { kind, baseAlpha: 0.76, multiply: true };
+    case "graphite-soft":
+      return { kind, baseAlpha: 0.62, multiply: true };
+    case "marker":
+      return { kind, baseAlpha: 0.76, multiply: true };
+    case "paint":
+      return { kind, baseAlpha: 0.7, multiply: true };
     case "highlighter":
       return { kind, baseAlpha: 0.22, multiply: true };
     default:
@@ -184,19 +229,23 @@ export function getInkVisual(object: Pick<InkObject, "brushId" | "tool">): Brush
  * highlighter stays translucent; no raster dabs are required for any tool.
  */
 export function getInkTexture(object: InkLike): InkTexture | undefined {
-  if (getInkBrushKind(object) !== "graphite") return undefined;
+  const kind = getInkBrushKind(object);
+  if (kind !== "graphite" && kind !== "graphite-soft" && kind !== "paint") return undefined;
   const points = preparedInkPoints(object);
   if (points.length < 2) return undefined;
-  const d = graphiteTexturePath(
-    points,
-    object.size,
-    Boolean((object.dynamics ?? DEFAULT_DYNAMICS).tiltAffectsAngle)
-  );
+  const d =
+    kind === "paint"
+      ? paintTexturePath(points, object.size)
+      : graphiteTexturePath(
+          points,
+          object.size * (kind === "graphite-soft" ? 1.35 : 1),
+          Boolean((object.dynamics ?? DEFAULT_DYNAMICS).tiltAffectsAngle)
+        );
   return d
     ? {
         d,
-        opacity: 0.3,
-        strokeWidth: Math.max(0.22, object.size * 0.065)
+        opacity: kind === "paint" ? 0.3 : kind === "graphite-soft" ? 0.4 : 0.3,
+        strokeWidth: Math.max(0.22, object.size * (kind === "paint" ? 0.09 : 0.065))
       }
     : undefined;
 }
@@ -276,7 +325,8 @@ function preparedInkPoints(object: InkLike): readonly RenderPoint[] {
   const cacheKey = points as object;
   const cached = preparedCache.get(cacheKey);
   if (cached?.key === key) return cached.points;
-  const prepared = stabilizeInkPoints(points, object.smoothing ?? 0.55, object.size);
+  const sensors = stabilizeInkPoints(points, object.smoothing ?? 0.55, object.size);
+  const prepared = stabilizeInkTrajectory(sensors, object.smoothing ?? 0.55);
   preparedCache.set(cacheKey, { key, points: prepared });
   return prepared;
 }
@@ -315,10 +365,46 @@ function strokeProfile(kind: BrushKind): StrokeProfile {
     case "graphite":
       return {
         thinning: 0.62,
-        smoothingBase: 0.5,
+        smoothingBase: 0.64,
         smoothingRange: 0.25,
-        streamlineBase: 0.14,
-        streamlineRange: 0.22,
+        streamlineBase: 0.1,
+        streamlineRange: 0.16,
+        roundCaps: true
+      };
+    case "graphite-soft":
+      return {
+        thinning: 0.48,
+        smoothingBase: 0.66,
+        smoothingRange: 0.26,
+        streamlineBase: 0.1,
+        streamlineRange: 0.16,
+        roundCaps: true
+      };
+    case "nib":
+      return {
+        thinning: 0.72,
+        smoothingBase: 0.7,
+        smoothingRange: 0.24,
+        streamlineBase: 0.1,
+        streamlineRange: 0.18,
+        roundCaps: true
+      };
+    case "marker":
+      return {
+        thinning: 0.04,
+        smoothingBase: 0.74,
+        smoothingRange: 0.2,
+        streamlineBase: 0.1,
+        streamlineRange: 0.16,
+        roundCaps: false
+      };
+    case "paint":
+      return {
+        thinning: 0.3,
+        smoothingBase: 0.7,
+        smoothingRange: 0.24,
+        streamlineBase: 0.1,
+        streamlineRange: 0.16,
         roundCaps: true
       };
     case "highlighter":
@@ -333,10 +419,10 @@ function strokeProfile(kind: BrushKind): StrokeProfile {
     default:
       return {
         thinning: 0.46,
-        smoothingBase: 0.56,
-        smoothingRange: 0.28,
-        streamlineBase: 0.18,
-        streamlineRange: 0.26,
+        smoothingBase: 0.66,
+        smoothingRange: 0.26,
+        streamlineBase: 0.1,
+        streamlineRange: 0.18,
         roundCaps: true
       };
   }
@@ -421,6 +507,24 @@ function graphiteTexturePath(
     const x2 = point.x + nx * across + tx * markLength;
     const y2 = point.y + ny * across + ty * markLength;
     d += `M${fmt(x1)},${fmt(y1)} L${fmt(x2)},${fmt(y2)} `;
+  }
+  return d.trim();
+}
+
+function paintTexturePath(points: readonly RenderPoint[], size: number): string {
+  const samples = resampleTexturePath(points, Math.max(3.4, size * 0.68));
+  if (samples.length < 3) return "";
+  let d = "";
+  for (let index = 1; index < samples.length - 1; index++) {
+    const previous = samples[index - 1]!;
+    const point = samples[index]!;
+    const next = samples[index + 1]!;
+    const length = Math.hypot(next.x - previous.x, next.y - previous.y) || 1;
+    const nx = -(next.y - previous.y) / length;
+    const ny = (next.x - previous.x) / length;
+    const spread = (pseudoRandom(index * 97) - 0.5) * size * 0.72;
+    const bristle = size * (0.16 + pseudoRandom(index * 61) * 0.16);
+    d += `M${fmt(point.x + nx * spread - bristle)},${fmt(point.y + ny * spread)} L${fmt(point.x + nx * spread + bristle)},${fmt(point.y + ny * spread)} `;
   }
   return d.trim();
 }

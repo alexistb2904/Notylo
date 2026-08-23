@@ -847,7 +847,8 @@ input:focus-visible,
   transform: translate(-50%, 10px);
 }
 .text-format-toolbar select,
-.text-format-toolbar input[type="number"] {
+.text-format-toolbar input[type="number"],
+.text-format-step {
   height: 31px;
   color: var(--tone-850);
   background: var(--tone-100);
@@ -865,6 +866,17 @@ input:focus-visible,
   padding: 0 6px;
   font-size: 11px;
   text-align: center;
+}
+.text-format-step {
+  width: 25px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+}
+.text-format-step:hover {
+  color: var(--tone-950);
+  border-color: var(--tone-500);
 }
 .text-format-divider {
   width: 1px;
@@ -1140,6 +1152,46 @@ input:focus-visible,
 .brush-grid button[aria-pressed="true"] .brush-copy small {
   color: #315f53;
 }
+.brush-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--tone-300);
+}
+.brush-controls label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 7px;
+  color: var(--tone-700);
+  font-size: 10px;
+  font-weight: 700;
+}
+.brush-controls output { color: var(--tone-850); font-variant-numeric: tabular-nums; }
+.brush-controls input { grid-column: 1 / -1; width: 100%; accent-color: var(--tone-850); }
+
+.desktop-passkey-page {
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  padding: 24px;
+  background: var(--tone-200);
+}
+.desktop-passkey-card {
+  display: grid;
+  width: min(100%, 440px);
+  gap: 16px;
+  padding: 32px;
+  border: 1px solid var(--tone-300);
+  border-radius: 18px;
+  background: var(--tone-100);
+  box-shadow: 0 24px 64px color-mix(in srgb, var(--tone-950) 16%, transparent);
+}
+.desktop-passkey-card .brand-mark { display: grid; place-items: center; width: 48px; height: 48px; }
+.desktop-passkey-card h1 { margin: -8px 0 0; font-size: 25px; }
+.desktop-passkey-card p { margin: 0; color: var(--tone-700); line-height: 1.5; }
+.desktop-passkey-card small { color: var(--tone-700); line-height: 1.4; }
 .canvas-area--direct-manipulation,
 .canvas-area--direct-manipulation * {
   -webkit-user-select: none;
@@ -1229,6 +1281,13 @@ input:focus-visible,
   border-radius: 7px;
   padding: 8px 13px;
   text-align: left;
+}
+.math-object .katex {
+  font-family: var(--equation-font-family, "Newsreader", serif);
+  font-size: 1em;
+}
+.math-object .katex * {
+  font-family: var(--equation-font-family, "Newsreader", serif);
 }
 .math-input {
   width: 100%;

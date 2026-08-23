@@ -2,14 +2,14 @@ import { useEffect, useState } from "react";
 import { KeyRound, LogOut, Pencil, Plus, ShieldCheck, Trash2, UserRound } from "lucide-react";
 import { Link, Navigate } from "react-router-dom";
 import { startRegistration } from "@simplewebauthn/browser";
-import { api, type Passkey } from "../lib/api";
+import { api, isTauri, type Passkey } from "../lib/api";
 import { authErrorMessage, useAuth } from "../lib/auth";
 import { formatDate, t } from "../i18n";
 
 type Notice = { readonly kind: "success" | "error"; readonly message: string } | undefined;
 
 export function ProfilePage() {
-  const { user, accessToken, updateUser, logout } = useAuth();
+  const { user, accessToken, updateUser, logout, registerPasskeyWithBrowser } = useAuth();
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
   const [passkeys, setPasskeys] = useState<readonly Passkey[]>([]);
   const [passkeyName, setPasskeyName] = useState("");
@@ -51,6 +51,13 @@ export function ProfilePage() {
     setNotice({ kind: "success", message: t("profile.passwordUpdated") });
   });
   const addPasskey = () => run("passkey", async () => {
+    if (isTauri) {
+      await registerPasskeyWithBrowser(passkeyName.trim() || t("profile.newPasskey"));
+      setPasskeyName("");
+      await loadPasskeys();
+      setNotice({ kind: "success", message: t("profile.passkeyAdded") });
+      return;
+    }
     if (!window.PublicKeyCredential) throw new Error(t("auth.passkeysUnsupported"));
     const options = await api.passkeyRegistrationOptions(accessToken, passkeyName.trim() || t("profile.newPasskey"));
     const response = await startRegistration({ optionsJSON: options as never });
@@ -116,7 +123,7 @@ export function ProfilePage() {
         </section>
         <section className="profile-card profile-card-wide" aria-labelledby="profile-passkeys-title">
           <div className="profile-card-heading"><KeyRound size={19} /><div><h2 id="profile-passkeys-title">{t("profile.passkeys")}</h2><p>{t("profile.passkeysDescription")}</p></div></div>
-          {window.PublicKeyCredential ? (
+          {(isTauri || window.PublicKeyCredential) ? (
             <form className="passkey-add" onSubmit={(event) => { event.preventDefault(); void addPasskey(); }}>
               <label>{t("profile.newPasskeyName")}<input value={passkeyName} maxLength={80} placeholder={t("profile.passkeyPlaceholder")} onChange={(event) => setPasskeyName(event.target.value)} /></label>
               <button className="primary-action" disabled={pending === "passkey"} type="submit"><Plus size={16} /> {pending === "passkey" ? t("profile.adding") : t("profile.addPasskey")}</button>

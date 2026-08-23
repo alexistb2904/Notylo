@@ -25,6 +25,11 @@ export type PasskeyLoginVerification = {
   email?: string;
   response: AuthenticationResponseJSON;
 };
+export type DesktopPasskeyStart = { state?: string; name?: string };
+export type DesktopPasskeyVerification = {
+  state?: string;
+  response?: AuthenticationResponseJSON | RegistrationResponseJSON;
+};
 export type AccountDeletion = { password: string; confirmation: string };
 export type NotebookDeletionRequest = {
   deletedAt?: number;
@@ -63,6 +68,7 @@ export type ApiContext = {
   registrationEnabled: boolean;
   webauthnRpId: string;
   webauthnOrigin: string;
+  desktopPasskeyUrl: string;
   sessions: Map<string, Set<RealtimeSocket>>;
 };
 export type DbClient = PoolClient;

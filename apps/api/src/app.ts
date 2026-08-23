@@ -8,7 +8,13 @@ import { Pool } from "pg";
 import { createStorage, drainPendingAssetDeletions } from "./storage.js";
 import { ensureSchema } from "./db.js";
 import { registerSecurityHooks } from "./security.js";
-import { isAllowedOrigin, readBoolean, readOrigins, required } from "./config.js";
+import {
+  isAllowedOrigin,
+  readBoolean,
+  readDesktopPasskeyUrl,
+  readOrigins,
+  required
+} from "./config.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerCloudRoutes } from "./routes/cloud.js";
 import { registerRealtimeRoutes } from "./routes/realtime.js";
@@ -39,6 +45,7 @@ export async function createApp() {
     registrationEnabled: readBoolean("REGISTRATION_ENABLED", !isProduction),
     webauthnRpId: process.env.WEBAUTHN_RP_ID ?? "localhost",
     webauthnOrigin: process.env.WEBAUTHN_ORIGIN ?? origins[0] ?? "http://localhost:5173",
+    desktopPasskeyUrl: readDesktopPasskeyUrl(isProduction),
     sessions: new Map()
   };
 

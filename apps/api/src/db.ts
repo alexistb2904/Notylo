@@ -25,6 +25,12 @@ export async function ensureSchema(pool: Pool): Promise<void> {
   await pool.query(
     "CREATE INDEX IF NOT EXISTS webauthn_challenges_user_purpose_idx ON webauthn_challenges(user_id, purpose)"
   );
+  await pool.query(
+    "CREATE TABLE IF NOT EXISTS desktop_passkey_sessions (state_hash TEXT PRIMARY KEY, user_id UUID REFERENCES users(id) ON DELETE CASCADE, purpose TEXT NOT NULL CHECK (purpose IN ('login', 'registration')), label TEXT, code_hash TEXT UNIQUE, completed_at TIMESTAMPTZ, expires_at TIMESTAMPTZ NOT NULL)"
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS desktop_passkey_sessions_expires_idx ON desktop_passkey_sessions(expires_at)"
+  );
   await pool.query("ALTER TABLE notebooks ADD COLUMN IF NOT EXISTS client_id TEXT");
   await pool.query("UPDATE notebooks SET client_id = id::text WHERE client_id IS NULL");
   await pool.query("ALTER TABLE notebooks ALTER COLUMN client_id SET NOT NULL");
@@ -89,7 +95,12 @@ export async function saveChallenge(
   challenge: string,
   label?: string
 ): Promise<void> {
-  if (userId) {
+  if (label) {
+    await pool.query(
+      "DELETE FROM webauthn_challenges WHERE label = $1 OR expires_at < now()",
+      [label]
+    );
+  } else if (userId) {
     await pool.query(
       "DELETE FROM webauthn_challenges WHERE (user_id = $1 AND purpose = $2) OR expires_at < now()",
       [userId, purpose]
@@ -109,12 +120,15 @@ export async function saveChallenge(
 export async function consumeChallenge(
   pool: Pool,
   userId: string | null,
-  purpose: "registration" | "authentication"
+  purpose: "registration" | "authentication",
+  label?: string
 ) {
   const userFilter = userId ? "user_id = $1" : "user_id IS NULL";
+  const purposeParameter = userId ? 2 : 1;
   const params = userId ? [userId, purpose] : [purpose];
+  const labelClause = label ? ` AND label = $${params.push(label)}` : "";
   const result = await pool.query<{ challenge: string; label: string | null }>(
-    `DELETE FROM webauthn_challenges WHERE id = (SELECT id FROM webauthn_challenges WHERE ${userFilter} AND purpose = $${userId ? 2 : 1} AND expires_at > now() ORDER BY expires_at DESC LIMIT 1) RETURNING challenge, label`,
+    `DELETE FROM webauthn_challenges WHERE id = (SELECT id FROM webauthn_challenges WHERE ${userFilter} AND purpose = $${purposeParameter}${labelClause} AND expires_at > now() ORDER BY expires_at DESC LIMIT 1) RETURNING challenge, label`,
     params
   );
   return result.rows[0];

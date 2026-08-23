@@ -26,7 +26,6 @@ import {
   type InkDynamics,
   type NotebookDocument,
   type ShapeObject,
-  type TextObject,
   type Transform
 } from "@notylo/document-model";
 import {
@@ -57,9 +56,9 @@ import { ExportDialog } from "./ExportDialog";
 import { EditorToolRail } from "./editor/EditorToolRail";
 import { EditorHeader, ArrowPointHandles, PageNavigator, Paper } from "./editor/WorkspaceChrome";
 import { WorkspaceDrawers } from "./editor/WorkspaceDrawers";
-import { TextFormattingToolbar, type TextFormatPatch } from "./editor/TextFormattingToolbar";
+import { TextFormattingToolbar, type ObjectFormatPatch } from "./editor/TextFormattingToolbar";
 import { previewObjectBounds, transformChanged } from "./editor/resizePreview";
-import { DEFAULT_COLORS, type IconShape } from "./editor/workspaceConstants";
+import { BRUSHES, DEFAULT_COLORS, type IconShape } from "./editor/workspaceConstants";
 import {
   distance,
   bookHeight,
@@ -142,8 +141,8 @@ export function EditorWorkspace(props: Props) {
   const [inkColor, setInkColor] = useState(
     () => readStoredPalette("notylo-ink-palette", DEFAULT_COLORS)[0] ?? "#292927"
   );
-  const [inkSize, setInkSize] = useState(3.2);
-  const [inkSmoothing, setInkSmoothing] = useState(0.55);
+  const [inkSize, setInkSize] = useState(2.4);
+  const [inkSmoothing, setInkSmoothing] = useState(0.58);
   const [brushId, setBrushId] = useState(
     () => localStorage.getItem("notylo-brush-id") ?? "ink-fineliner"
   );
@@ -1189,33 +1188,33 @@ export function EditorWorkspace(props: Props) {
     ? selectedObjects.map((object) => previewObjectBounds(object, resizePreviewTransform))
     : selectedObjects;
   const previewById = new Map(previewSelectedObjects.map((object) => [object.id, object]));
-  const selectedText =
-    selectedObjects.length === 1 && selectedObjects[0]?.type === "text"
-      ? (selectedObjects[0] as TextObject)
+  const selectedFormattable =
+    selectedObjects.length === 1 && (selectedObjects[0]?.type === "text" || selectedObjects[0]?.type === "math")
+      ? selectedObjects[0]
       : undefined;
-  const previewText =
-    previewSelectedObjects.length === 1 && previewSelectedObjects[0]?.type === "text"
-      ? (previewSelectedObjects[0] as TextObject)
+  const previewFormattable =
+    previewSelectedObjects.length === 1 && (previewSelectedObjects[0]?.type === "text" || previewSelectedObjects[0]?.type === "math")
+      ? previewSelectedObjects[0]
       : undefined;
-  const updateTextFormat = (patch: TextFormatPatch) => {
-    if (!selectedText) return;
+  const updateObjectFormat = (patch: ObjectFormatPatch) => {
+    if (!selectedFormattable) return;
     const current = props.documentRef.current.objects.find(
-      (object): object is TextObject => object.id === selectedText.id && object.type === "text"
+      (object) => object.id === selectedFormattable.id && object.type === selectedFormattable.type
     );
     if (!current) return;
     props.onUpdate(
       [current],
       [{ ...current, ...patch, updatedAt: Date.now() }],
-      t("ops.formatText")
+      t(current.type === "text" ? "ops.formatText" : "ops.formatEquation")
     );
   };
   const textToolbarPosition = (() => {
-    if (!previewText) return undefined;
-    const pageOffset = previewText.pageId ? (pageOffsets[previewText.pageId] ?? 0) : 0;
-    const rawX = origin.x + camera.x + (previewText.x + previewText.width / 2) * camera.zoom;
-    const topY = origin.y + camera.y + (pageOffset + previewText.y) * camera.zoom;
+    if (!previewFormattable) return undefined;
+    const pageOffset = previewFormattable.pageId ? (pageOffsets[previewFormattable.pageId] ?? 0) : 0;
+    const rawX = origin.x + camera.x + (previewFormattable.x + previewFormattable.width / 2) * camera.zoom;
+    const topY = origin.y + camera.y + (pageOffset + previewFormattable.y) * camera.zoom;
     const below = topY < 72;
-    const rawY = below ? topY + previewText.height * camera.zoom : topY;
+    const rawY = below ? topY + previewFormattable.height * camera.zoom : topY;
     const halfToolbar = Math.min(300, Math.max(0, (viewSize.width - 24) / 2));
     const x =
       viewSize.width <= 624
@@ -1273,9 +1272,21 @@ export function EditorWorkspace(props: Props) {
             onToolChange={(nextTool) => {
               setTool(nextTool);
               setMobileToolsOpen(false);
-              if (nextTool === "pen") setBrushId("ink-fineliner");
-              if (nextTool === "pencil") setBrushId("pencil-sketch");
-              if (nextTool === "highlighter") setBrushId("highlighter-flat");
+              const defaultBrushId =
+                nextTool === "pen"
+                  ? "ink-fineliner"
+                  : nextTool === "pencil"
+                    ? "pencil-sketch"
+                    : nextTool === "highlighter"
+                      ? "highlighter-flat"
+                      : undefined;
+              const defaultBrush = BRUSHES.find((brush) => brush.id === defaultBrushId);
+              if (defaultBrush) {
+                setBrushId(defaultBrush.id);
+                setInkSize(defaultBrush.size);
+                setInkSmoothing(defaultBrush.smoothing);
+                setInkDynamics(defaultBrush.dynamics);
+              }
             }}
             onToggleBrushes={() => setShowBrushes((value) => !value)}
             onToggleIcons={() => {
@@ -1391,6 +1402,8 @@ export function EditorWorkspace(props: Props) {
               showIcons={showIcons}
               iconShape={iconShape}
               brushId={brushId}
+              size={inkSize}
+              smoothing={inkSmoothing}
               onColor={setColor}
               onPaletteColor={updatePaletteColor}
               onCloseBrushes={() => setShowBrushes(false)}
@@ -1399,8 +1412,11 @@ export function EditorWorkspace(props: Props) {
                 setBrushId(brush.id);
                 setInkSize(brush.size);
                 setInkSmoothing(brush.smoothing);
+                setInkDynamics(brush.dynamics);
                 setShowBrushes(false);
               }}
+              onSize={setInkSize}
+              onSmoothing={setInkSmoothing}
               onCloseIcons={() => setShowIcons(false)}
               onIcon={(shape) => {
                 setIconShape(shape);
@@ -1493,13 +1509,13 @@ export function EditorWorkspace(props: Props) {
                 />
               )}
           </div>
-          {!readOnly && selectedText && textToolbarPosition && (
+          {!readOnly && selectedFormattable && textToolbarPosition && (
             <TextFormattingToolbar
-              object={selectedText}
+              object={selectedFormattable}
               x={textToolbarPosition.x}
               y={textToolbarPosition.y}
               below={textToolbarPosition.below}
-              onChange={updateTextFormat}
+              onChange={updateObjectFormat}
             />
           )}
           {document.notebook.mode === "whiteboard" && (

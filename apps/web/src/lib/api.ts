@@ -1,6 +1,6 @@
 import { intlLocale, localizeRemoteError, t } from "../i18n";
 
-const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const defaultApiUrl = isTauri ? "https://notes.alexistb.com/api" : "http://localhost:3001";
 const API_URL = (import.meta.env.VITE_API_URL ?? defaultApiUrl).replace(/\/$/, "");
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -164,6 +164,30 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...(email ? { email } : {}), response })
     }),
+  desktopPasskeyLoginStart: (state: string) =>
+    request<{ url: string }>("/auth/desktop/passkeys/login/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state })
+    }),
+  desktopPasskeyLoginOptions: (state: string) =>
+    request<Record<string, unknown>>("/auth/desktop/passkeys/login/options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state })
+    }),
+  desktopPasskeyLoginVerify: (state: string, response: unknown) =>
+    request<{ continueUrl: string }>("/auth/desktop/passkeys/login/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state, response })
+    }),
+  desktopPasskeyLoginExchange: (state: string, code: string) =>
+    request<AuthResponse>("/auth/desktop/passkeys/login/exchange", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state, code })
+    }),
   passkeyRegistrationOptions: (accessToken: string, name: string) =>
     request<Record<string, unknown>>("/auth/passkeys/registration/options", {
       method: "POST",
@@ -175,6 +199,24 @@ export const api = {
       method: "POST",
       headers: { ...bearer(accessToken), "Content-Type": "application/json" },
       body: JSON.stringify({ response })
+    }),
+  desktopPasskeyRegistrationStart: (accessToken: string, state: string, name: string) =>
+    request<{ url: string }>("/auth/desktop/passkeys/registration/start", {
+      method: "POST",
+      headers: { ...bearer(accessToken), "Content-Type": "application/json" },
+      body: JSON.stringify({ state, name })
+    }),
+  desktopPasskeyRegistrationOptions: (state: string) =>
+    request<Record<string, unknown>>("/auth/desktop/passkeys/registration/options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state })
+    }),
+  desktopPasskeyRegistrationVerify: (state: string, response: unknown) =>
+    request<{ continueUrl: string }>("/auth/desktop/passkeys/registration/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state, response })
     }),
   passkeys: (accessToken: string) =>
     request<{ passkeys: readonly Passkey[] }>("/auth/passkeys", {

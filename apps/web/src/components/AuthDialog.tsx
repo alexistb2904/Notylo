@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { authErrorMessage, isCloudUnavailable, useAuth } from "../lib/auth";
+import { isTauri } from "../lib/api";
 import { t } from "../i18n";
 
 export function AuthDialog({ onClose, required = false }: { onClose(): void; required?: boolean }) {
@@ -136,7 +137,7 @@ export function AuthDialog({ onClose, required = false }: { onClose(): void; req
             {t("auth.continueOffline")}
           </button>
         )}
-        {!createAccount && window.PublicKeyCredential && (
+        {!createAccount && (isTauri || window.PublicKeyCredential) && (
           <button
             className="outline-action passkey-login"
             disabled={pending}

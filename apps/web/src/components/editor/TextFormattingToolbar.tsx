@@ -1,19 +1,20 @@
 import type { CSSProperties, KeyboardEvent } from "react";
 import { useEffect, useState } from "react";
-import type { TextObject } from "@notylo/document-model";
-import { AlignCenter, AlignLeft, AlignRight, Bold, Italic, Palette, Underline } from "lucide-react";
+import type { MathObject, TextObject } from "@notylo/document-model";
+import { AlignCenter, AlignLeft, AlignRight, Bold, Italic, Minus, Palette, Plus, Underline } from "lucide-react";
 import { t } from "../../i18n";
 
-export type TextFormatPatch = Partial<
-  Pick<TextObject, "fontFamily" | "fontSize" | "color" | "align" | "bold" | "italic" | "underline">
->;
+export type TextFormatPatch = Partial<Pick<TextObject, "fontFamily" | "fontSize" | "color" | "align" | "bold" | "italic" | "underline">>;
+export type MathFormatPatch = Partial<Pick<MathObject, "fontFamily" | "fontSize" | "color">>;
+export type ObjectFormatPatch = TextFormatPatch | MathFormatPatch;
+type FormattableObject = TextObject | MathObject;
 
 interface Props {
-  readonly object: TextObject;
+  readonly object: FormattableObject;
   readonly x: number;
   readonly y: number;
   readonly below?: boolean;
-  onChange(patch: TextFormatPatch): void;
+  onChange(patch: ObjectFormatPatch): void;
 }
 
 const FONT_OPTIONS = [
@@ -26,35 +27,53 @@ const FONT_OPTIONS = [
 ] as const;
 const MIN_FONT_SIZE = 8;
 const MAX_FONT_SIZE = 144;
+const DEFAULT_FONT_FAMILY = "Newsreader, serif";
+const DEFAULT_FONT_SIZE = 22;
 
 export function TextFormattingToolbar({ object, x, y, below = false, onChange }: Props) {
-  const [fontSize, setFontSize] = useState(String(Math.round(object.fontSize)));
+  const isText = object.type === "text";
+  const objectFontFamily = object.fontFamily ?? DEFAULT_FONT_FAMILY;
+  const objectFontSize = object.fontSize ?? DEFAULT_FONT_SIZE;
+  const [fontSize, setFontSize] = useState(String(Math.round(objectFontSize)));
 
-  useEffect(() => setFontSize(String(Math.round(object.fontSize))), [object.fontSize]);
+  useEffect(() => setFontSize(String(Math.round(objectFontSize))), [objectFontSize]);
+
+  const updateFontSize = (value: string) => {
+    setFontSize(value);
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= MIN_FONT_SIZE && parsed <= MAX_FONT_SIZE && Math.abs(parsed - objectFontSize) > 0.01)
+      onChange({ fontSize: parsed });
+  };
 
   const commitFontSize = () => {
     const parsed = Number(fontSize);
     const next = Number.isFinite(parsed)
       ? Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, parsed))
-      : object.fontSize;
+      : objectFontSize;
     setFontSize(String(Math.round(next)));
-    if (Math.abs(next - object.fontSize) > 0.01) onChange({ fontSize: next });
+    if (Math.abs(next - objectFontSize) > 0.01) onChange({ fontSize: next });
   };
   const onFontSizeKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") event.currentTarget.blur();
     if (event.key === "Escape") {
-      setFontSize(String(Math.round(object.fontSize)));
+      setFontSize(String(Math.round(objectFontSize)));
       event.currentTarget.blur();
     }
   };
 
-  const knownFont = FONT_OPTIONS.some((font) => font.value === object.fontFamily);
+  const adjustFontSize = (delta: number) => {
+    const next = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(objectFontSize + delta)));
+    setFontSize(String(next));
+    if (next !== objectFontSize) onChange({ fontSize: next });
+  };
+
+  const knownFont = FONT_OPTIONS.some((font) => font.value === objectFontFamily);
 
   return (
     <div
       className={`text-format-toolbar${below ? " is-below" : ""}`}
       role="toolbar"
-      aria-label={t("textFormat.aria")}
+      aria-label={t(isText ? "textFormat.aria" : "textFormat.equationAria")}
       style={{ left: x, top: y } as CSSProperties}
       onPointerDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
@@ -64,10 +83,10 @@ export function TextFormattingToolbar({ object, x, y, below = false, onChange }:
         className="text-format-font"
         aria-label={t("textFormat.fontFamily")}
         title={t("textFormat.fontFamily")}
-        value={object.fontFamily}
+        value={objectFontFamily}
         onChange={(event) => onChange({ fontFamily: event.target.value })}
       >
-        {!knownFont && <option value={object.fontFamily}>{object.fontFamily.split(",")[0]}</option>}
+        {!knownFont && <option value={objectFontFamily}>{objectFontFamily.split(",")[0]}</option>}
         {FONT_OPTIONS.map((font) => (
           <option key={font.value} value={font.value} style={{ fontFamily: font.value }}>
             {font.label}
@@ -75,6 +94,9 @@ export function TextFormattingToolbar({ object, x, y, below = false, onChange }:
         ))}
       </select>
 
+      <button type="button" className="text-format-step" aria-label={t("textFormat.decreaseFontSize")} title={t("textFormat.decreaseFontSize")} onClick={() => adjustFontSize(-1)}>
+        <Minus size={14} />
+      </button>
       <input
         className="text-format-size"
         type="number"
@@ -85,14 +107,17 @@ export function TextFormattingToolbar({ object, x, y, below = false, onChange }:
         value={fontSize}
         aria-label={t("textFormat.fontSize")}
         title={t("textFormat.fontSize")}
-        onChange={(event) => setFontSize(event.target.value)}
+        onChange={(event) => updateFontSize(event.target.value)}
         onBlur={commitFontSize}
         onKeyDown={onFontSizeKeyDown}
       />
+      <button type="button" className="text-format-step" aria-label={t("textFormat.increaseFontSize")} title={t("textFormat.increaseFontSize")} onClick={() => adjustFontSize(1)}>
+        <Plus size={14} />
+      </button>
 
-      <span className="text-format-divider" aria-hidden="true" />
+      {isText && <span className="text-format-divider" aria-hidden="true" />}
 
-      <button
+      {isText && <button
         type="button"
         className="text-format-icon"
         aria-label={t("textFormat.bold")}
@@ -101,8 +126,8 @@ export function TextFormattingToolbar({ object, x, y, below = false, onChange }:
         onClick={() => onChange({ bold: !object.bold })}
       >
         <Bold size={16} />
-      </button>
-      <button
+      </button>}
+      {isText && <button
         type="button"
         className="text-format-icon"
         aria-label={t("textFormat.italic")}
@@ -111,8 +136,8 @@ export function TextFormattingToolbar({ object, x, y, below = false, onChange }:
         onClick={() => onChange({ italic: !object.italic })}
       >
         <Italic size={16} />
-      </button>
-      <button
+      </button>}
+      {isText && <button
         type="button"
         className="text-format-icon"
         aria-label={t("textFormat.underline")}
@@ -121,11 +146,11 @@ export function TextFormattingToolbar({ object, x, y, below = false, onChange }:
         onClick={() => onChange({ underline: !object.underline })}
       >
         <Underline size={16} />
-      </button>
+      </button>}
 
-      <span className="text-format-divider" aria-hidden="true" />
+      {isText && <span className="text-format-divider" aria-hidden="true" />}
 
-      <div className="text-format-align" role="group" aria-label={t("textFormat.alignment")}>
+      {isText && <div className="text-format-align" role="group" aria-label={t("textFormat.alignment")}>
         <button
           type="button"
           className="text-format-icon"
@@ -156,7 +181,7 @@ export function TextFormattingToolbar({ object, x, y, below = false, onChange }:
         >
           <AlignRight size={16} />
         </button>
-      </div>
+      </div>}
 
       <span className="text-format-divider" aria-hidden="true" />
 
