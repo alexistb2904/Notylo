@@ -150,6 +150,17 @@ test("keeps the mobile toolbar inside the dynamic viewport", async ({ page }) =>
   for (const height of [844, 700, 568]) {
     await page.setViewportSize({ width: 390, height });
     await expect(dock).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          Math.round(
+            Number.parseFloat(
+              document.documentElement.style.getPropertyValue("--notylo-viewport-height")
+            )
+          )
+        )
+      )
+      .toBe(height);
 
     const metrics = await page.evaluate(() => {
       const shell = document.querySelector<HTMLElement>(".editor-shell");
