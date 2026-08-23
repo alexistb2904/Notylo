@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const makeDocument = (title: string) => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   notebook: {
     id: `nb-${title.toLowerCase().replace(/\s+/g, "-")}`,
     title,
@@ -15,7 +15,7 @@ const makeDocument = (title: string) => ({
       darkPaper: false,
       pageGap: 48
     },
-    schemaVersion: 1,
+    schemaVersion: 2,
     coverColor: "#476960"
   },
   pages: [

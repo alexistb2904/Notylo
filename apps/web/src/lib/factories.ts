@@ -2,8 +2,8 @@ import {
   createId,
   type BaseObject,
   type DocumentObject,
+  type InkBrush,
   type InkObject,
-  type InkDynamics,
   type InkPoint,
   type MathObject,
   type ShapeObject,
@@ -41,11 +41,8 @@ export function newInk(
     points: readonly InkPoint[];
     color: string;
     size: number;
-    tool: InkObject["tool"];
-    smoothing?: number;
-    captureZoom?: number;
-    brushId?: string;
-    dynamics?: InkDynamics;
+    stabilizer: number;
+    brush: InkBrush;
   }
 ): InkObject {
   return {
@@ -54,11 +51,8 @@ export function newInk(
     points: input.points,
     color: input.color,
     size: input.size,
-    tool: input.tool,
-    smoothing: input.smoothing ?? 0.48,
-    ...(input.captureZoom !== undefined ? { captureZoom: input.captureZoom } : {}),
-    ...(input.brushId ? { brushId: input.brushId } : {}),
-    ...(input.dynamics ? { dynamics: input.dynamics } : {})
+    stabilizer: input.stabilizer,
+    brush: input.brush
   };
 }
 export function newText(input: ObjectBaseInput & { text?: string }): TextObject {

@@ -1,5 +1,6 @@
 import type { Point, Rect } from "@notylo/canvas-engine";
-import type { DocumentObject, InkDynamics, InkPoint, ShapeObject } from "@notylo/document-model";
+import type { DocumentObject, InkBrush, InkPoint, ShapeObject } from "@notylo/document-model";
+import type { InkStabilizer } from "../../lib/ink";
 
 export type Tool =
   | "select"
@@ -23,10 +24,9 @@ export interface DraftInk {
   readonly tool: "pen" | "pencil" | "highlighter";
   readonly color: string;
   readonly size: number;
-  readonly smoothing: number;
-  readonly captureZoom: number;
-  readonly brushId: string;
-  readonly dynamics: InkDynamics;
+  readonly stabilizer: number;
+  readonly brush: InkBrush;
+  readonly stabilizerState: InkStabilizer;
   readonly recognizeShape?: boolean;
   straightLine?:
     { readonly points: readonly [InkPoint, InkPoint]; readonly startedAt: number } | undefined;

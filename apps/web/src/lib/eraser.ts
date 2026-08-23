@@ -189,10 +189,10 @@ function objectIntersectsEraser(
 }
 
 function inkHalfWidth(ink: InkObject, point: Pick<InkPoint, "pressure">): number {
-  const dynamics = ink.dynamics;
-  if (!dynamics?.pressureAffectsWidth) return ink.size / 2;
+  const dynamics = ink.brush.dynamics;
+  if (!dynamics.pressureAffectsWidth) return ink.size / 2;
   const pressure = pressureCurve(point.pressure, dynamics.pressureSensitivity);
-  return (ink.size * (0.14 + pressure * 0.86)) / 2;
+  return (ink.size * (0.2 + pressure * 0.8)) / 2;
 }
 function pressureCurve(pressure: number, sensitivity: number): number {
   const input = Math.min(1, Math.max(0, pressure));

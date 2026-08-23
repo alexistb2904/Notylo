@@ -1,4 +1,4 @@
-export const DOCUMENT_SCHEMA_VERSION = 1 as const;
+export const DOCUMENT_SCHEMA_VERSION = 2 as const;
 
 export type NotebookMode = "book" | "whiteboard";
 export type PageSize = "a4" | "a5" | "letter" | "tablet" | "custom";
@@ -108,19 +108,32 @@ export interface InkDynamics {
   readonly tiltAffectsAngle: boolean;
 }
 
+export type InkBrushTip = "round" | "chisel" | "graphite" | "bristle";
+
+/** Complete brush recipe stored with every stroke. */
+export interface InkBrush {
+  readonly id: string;
+  readonly tip: InkBrushTip;
+  readonly spacing: number;
+  readonly hardness: number;
+  readonly flow: number;
+  readonly opacity: number;
+  readonly aspect: number;
+  readonly angle: number;
+  readonly rotation: "fixed" | "direction" | "tilt";
+  readonly scatter: number;
+  readonly grain: number;
+  readonly blendMode: "normal" | "multiply";
+  readonly dynamics: InkDynamics;
+}
+
 export interface InkObject extends BaseObject {
   readonly type: "ink";
   readonly points: readonly InkPoint[];
   readonly color: string;
   readonly size: number;
-  readonly tool: "pen" | "pencil" | "highlighter";
-  readonly smoothing: number;
-  /** Zoom at pointer-down. New ink uses it only to reduce streamline lag for precision writing. */
-  readonly captureZoom?: number;
-  /** Brush preset used by the web renderer. Missing means a legacy tool preset. */
-  readonly brushId?: string;
-  /** Stored with the stroke so later preference changes do not alter old ink. */
-  readonly dynamics?: InkDynamics;
+  readonly stabilizer: number;
+  readonly brush: InkBrush;
 }
 
 export interface TextRun {

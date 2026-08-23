@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useState } from "react";
 import { newInk } from "../lib/factories";
 import { formatNumber, t } from "../i18n";
+import { BRUSHES } from "../components/editor/workspaceConstants";
 
 export function BenchmarkPage() {
   const [amount, setAmount] = useState(0);
@@ -22,7 +23,8 @@ export function BenchmarkPage() {
         ],
         color: "#171717",
         size: 2,
-        tool: "pen"
+        stabilizer: BRUSHES[0].stabilizer,
+        brush: BRUSHES[0].brush
       })
     );
     setAmount(objects.length);

@@ -1,7 +1,7 @@
 import type { Camera, Point, Rect } from "@notylo/canvas-engine";
 import type {
   DocumentObject,
-  InkDynamics,
+  InkBrush,
   InkPoint,
   NotebookDocument,
   ShapeObject,
@@ -14,10 +14,8 @@ export interface CanvasDraftInk {
   readonly tool: "pen" | "pencil" | "highlighter";
   readonly color: string;
   readonly size: number;
-  readonly smoothing: number;
-  readonly captureZoom: number;
-  readonly brushId: string;
-  readonly dynamics: InkDynamics;
+  readonly stabilizer: number;
+  readonly brush: InkBrush;
   readonly straightLine?:
     { readonly points: readonly InkPoint[]; readonly startedAt: number } | undefined;
 }

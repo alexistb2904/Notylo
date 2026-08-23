@@ -9,14 +9,5 @@ export function migrateDocument(input: UnknownDocument): NotebookDocument {
     throw new Error("This notebook was created by a newer version of Notylo.");
   }
   if (version === DOCUMENT_SCHEMA_VERSION) return input as unknown as NotebookDocument;
-  return migrateV0ToV1(input);
-}
-
-export function migrateV0ToV1(input: UnknownDocument): NotebookDocument {
-  const document = input as unknown as NotebookDocument;
-  return {
-    ...document,
-    schemaVersion: DOCUMENT_SCHEMA_VERSION,
-    notebook: { ...document.notebook, schemaVersion: DOCUMENT_SCHEMA_VERSION }
-  };
+  throw new Error("This notebook uses the retired ink engine and cannot be opened.");
 }

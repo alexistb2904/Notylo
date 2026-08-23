@@ -1,18 +1,11 @@
 import { CanvasEngine, type Camera, type Point, type Rect } from "@notylo/canvas-engine";
 import type {
   DocumentObject,
-  InkObject,
   NotebookDocument,
   ShapeObject,
   Transform
 } from "@notylo/document-model";
 import { memo, useMemo, type MutableRefObject } from "react";
-import {
-  getInkSvgPathData,
-  getInkTexture,
-  getInkVisual,
-  getPressureMaskSegments
-} from "./canvas/inkVector";
 
 interface Props {
   readonly documentRef: MutableRefObject<NotebookDocument>;
@@ -26,7 +19,7 @@ interface Props {
   readonly dragOffset: Point;
 }
 
-type VectorObject = InkObject | ShapeObject;
+type VectorObject = ShapeObject;
 
 interface VectorIndexState {
   readonly engine: CanvasEngine;
@@ -73,11 +66,7 @@ export function VectorObjectLayer(props: Props) {
             : undefined;
           return (
             <g key={object.id} transform={resizeTransform}>
-              {object.type === "ink" ? (
-                <SvgInk object={object} dx={dx} dy={dy} />
-              ) : (
-                <SvgShape object={object} dx={dx} dy={dy} />
-              )}
+              <SvgShape object={object} dx={dx} dy={dy} />
             </g>
           );
         })}
@@ -140,76 +129,8 @@ function visibleVectorObjects(
 }
 
 function isVectorObject(object: DocumentObject): object is VectorObject {
-  return object.type === "ink" || object.type === "shape";
+  return object.type === "shape";
 }
-
-const SvgInk = memo(function SvgInk({
-  object,
-  dx,
-  dy
-}: {
-  readonly object: InkObject;
-  readonly dx: number;
-  readonly dy: number;
-}) {
-  const d = getInkSvgPathData(object);
-  if (!d) return null;
-  const visual = getInkVisual(object);
-  const texture = getInkTexture(object);
-  const maskSegments = getPressureMaskSegments(object);
-  const maskId = `ink-pressure-${safeSvgId(object.id)}`;
-  const transform = dx || dy ? `translate(${dx} ${dy})` : undefined;
-  const opacity = visual.baseAlpha * object.opacity;
-
-  return (
-    <g transform={transform} style={{ mixBlendMode: visual.multiply ? "multiply" : "normal" }}>
-      {maskSegments.length > 0 && (
-        <defs>
-          <mask
-            id={maskId}
-            maskUnits="userSpaceOnUse"
-            maskContentUnits="userSpaceOnUse"
-            x={object.x - object.size * 4}
-            y={object.y - object.size * 4}
-            width={object.width + object.size * 8}
-            height={object.height + object.size * 8}
-          >
-            {maskSegments.map((segment, index) => (
-              <line
-                key={index}
-                x1={segment.from.x}
-                y1={segment.from.y}
-                x2={segment.to.x}
-                y2={segment.to.y}
-                stroke="white"
-                strokeOpacity={segment.opacity}
-                strokeWidth={object.size * 2.5}
-                strokeLinecap="round"
-              />
-            ))}
-          </mask>
-        </defs>
-      )}
-      <path
-        d={d}
-        fill={object.color}
-        fillOpacity={opacity}
-        mask={maskSegments.length ? `url(#${maskId})` : undefined}
-      />
-      {texture?.d && (
-        <path
-          d={texture.d}
-          fill="none"
-          stroke={object.color}
-          strokeOpacity={texture.opacity * object.opacity}
-          strokeWidth={texture.strokeWidth}
-          strokeLinecap="round"
-          mask={maskSegments.length ? `url(#${maskId})` : undefined}
-        />
-      )}
-    </g>
-  );
-});
 
 const SvgShape = memo(function SvgShape({
   object,
@@ -290,10 +211,6 @@ function arrowHead(tip: Point, previous: Point, strokeWidth: number): string {
   const bx = tip.x - size * Math.cos(angle + Math.PI / 6);
   const by = tip.y - size * Math.sin(angle + Math.PI / 6);
   return `M${tip.x.toFixed(2)},${tip.y.toFixed(2)} L${ax.toFixed(2)},${ay.toFixed(2)} M${tip.x.toFixed(2)},${tip.y.toFixed(2)} L${bx.toFixed(2)},${by.toFixed(2)}`;
-}
-
-function safeSvgId(id: string): string {
-  return id.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
 function whiteboardViewport(origin: Point, camera: Camera): Rect {

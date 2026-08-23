@@ -1077,65 +1077,10 @@ input:focus-visible,
   border-color: var(--tone-500);
 }
 .brush-preview {
-  position: relative;
   display: block;
-  width: 48px;
-  height: 22px;
-  flex: 0 0 48px;
-  overflow: hidden;
-}
-.brush-preview::before,
-.brush-preview::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 1px;
-  width: 46px;
-  height: var(--brush-size);
-  max-height: 12px;
-  border-radius: 99px;
-  background: currentColor;
-  transform: translateY(-50%) rotate(-5deg);
-}
-.brush-preview--ink::after,
-.brush-preview--nib::after {
-  top: calc(50% - 1px);
-  height: max(1px, calc(var(--brush-size) * 0.28));
-  opacity: 0.32;
-}
-.brush-preview--nib::before {
-  border-radius: 2px;
-  transform: translateY(-50%) rotate(-12deg) skewX(-18deg);
-}
-.brush-preview--graphite::before,
-.brush-preview--graphite-soft::before {
-  opacity: 0.72;
-  clip-path: polygon(0 25%, 100% 0, 100% 82%, 0 100%);
-  background-image: repeating-linear-gradient(90deg, currentColor 0 2px, transparent 2px 4px);
-}
-.brush-preview--graphite::after,
-.brush-preview--graphite-soft::after {
-  top: calc(50% + 2px);
-  height: max(1px, calc(var(--brush-size) * 0.2));
-  opacity: 0.42;
-  transform: translateY(-50%) rotate(-8deg);
-}
-.brush-preview--marker::before,
-.brush-preview--highlighter::before {
-  border-radius: 2px;
-  opacity: 0.42;
-}
-.brush-preview--marker::after,
-.brush-preview--highlighter::after {
-  display: none;
-}
-.brush-preview--paint::before {
-  height: min(12px, var(--brush-size));
-  border-radius: 2px 70% 70% 2px;
-  background: repeating-linear-gradient(0deg, currentColor 0 1px, transparent 1px 2.5px);
-}
-.brush-preview--paint::after {
-  display: none;
+  width: 56px;
+  height: 24px;
+  flex: 0 0 56px;
 }
 .brush-copy {
   display: grid;
@@ -1281,6 +1226,21 @@ input:focus-visible,
   border-radius: 7px;
   padding: 8px 13px;
   text-align: left;
+}
+.ink-object-layer,
+.live-ink-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+.ink-object-layer {
+  z-index: 2;
+}
+.live-ink-canvas {
+  z-index: 3;
 }
 .math-object .katex {
   font-family: var(--equation-font-family, "Newsreader", serif);

@@ -20,14 +20,15 @@ const makeInk = (locked = false): InkObject => ({
   updatedAt: 1,
   color: "#111111",
   size: 4,
-  tool: "pen",
-  smoothing: 0.5,
-  brushId: "ink-fineliner",
-  dynamics: {
-    pressureSensitivity: 0.5,
-    pressureAffectsWidth: true,
-    pressureAffectsOpacity: false,
-    tiltAffectsAngle: true
+  stabilizer: 0.5,
+  brush: {
+    id: "ink-fineliner", tip: "round", spacing: 0.1, hardness: 1, flow: 1,
+    opacity: 1, aspect: 1, angle: 0, rotation: "fixed", scatter: 0, grain: 0,
+    blendMode: "normal",
+    dynamics: {
+      pressureSensitivity: 0.5, pressureAffectsWidth: true,
+      pressureAffectsOpacity: false, tiltAffectsAngle: true
+    }
   },
   points: Array.from({ length: 11 }, (_, index) => ({
     x: index * 10,
@@ -52,8 +53,7 @@ describe("precision eraser", () => {
     expect(fragments).toHaveLength(2);
     expect(fragments[0]?.id).toBe(source.id);
     expect(fragments[1]?.id).toBe(`${source.id}_cut_${source.updatedAt}_1`);
-    expect(fragments.every((fragment) => fragment.brushId === source.brushId)).toBe(true);
-    expect(fragments.every((fragment) => fragment.dynamics === source.dynamics)).toBe(true);
+    expect(fragments.every((fragment) => fragment.brush === source.brush)).toBe(true);
     expect(
       fragments.flatMap((fragment) => fragment.points).every((point) => Math.abs(point.x - 50) > 4)
     ).toBe(true);

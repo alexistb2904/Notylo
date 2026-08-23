@@ -2,7 +2,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Point } from "@notylo/canvas-engine";
 import type { InkPoint, ShapeObject } from "@notylo/document-model";
 import type { newInk } from "../../lib/factories";
-import { appendInkPoint } from "../../lib/ink";
+import { appendInkPoint, type InkStabilizer } from "../../lib/ink";
 import { distance } from "./geometry";
 
 export function toInkPoint(event: ReactPointerEvent, point: Point): InkPoint {
@@ -20,17 +20,29 @@ export function appendCoalescedInkPoints(
   points: InkPoint[],
   event: ReactPointerEvent<HTMLDivElement>,
   worldAt: (event: Pick<ReactPointerEvent, "clientX" | "clientY">) => Point,
-  minimumDistance = 0.12
+  minimumDistance = 0.12,
+  stabilizer?: InkStabilizer
 ): void {
   const terminalPenEvent =
     event.pointerType === "pen" && (event.type === "pointerup" || event.type === "pointercancel");
   const sourceEvents = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent];
-  for (const source of sourceEvents) {
-    if (isTerminalPenLift(source, terminalPenEvent)) continue;
+  let previousSignature = "";
+  const appendSource = (source: PointerEvent) => {
+    if (isTerminalPenLift(source, terminalPenEvent)) return;
+    const signature = `${source.timeStamp}:${source.clientX}:${source.clientY}:${source.pressure}`;
+    if (signature === previousSignature) return;
+    previousSignature = signature;
     const point = worldAt(source);
     appendInkPoint(
       points,
-      {
+      stabilizer?.push({
+        x: point.x,
+        y: point.y,
+        pressure: resolvePointerPressure(source),
+        tiltX: source.tiltX,
+        tiltY: source.tiltY,
+        timestamp: source.timeStamp
+      }) ?? {
         x: point.x,
         y: point.y,
         pressure: resolvePointerPressure(source),
@@ -40,21 +52,9 @@ export function appendCoalescedInkPoints(
       },
       minimumDistance
     );
-  }
-  if (isTerminalPenLift(event, terminalPenEvent)) return;
-  const point = worldAt(event.nativeEvent);
-  appendInkPoint(
-    points,
-    {
-      x: point.x,
-      y: point.y,
-      pressure: resolvePointerPressure(event),
-      tiltX: event.tiltX,
-      tiltY: event.tiltY,
-      timestamp: event.timeStamp
-    },
-    minimumDistance
-  );
+  };
+  for (const source of sourceEvents) appendSource(source);
+  appendSource(event.nativeEvent);
 }
 
 /**

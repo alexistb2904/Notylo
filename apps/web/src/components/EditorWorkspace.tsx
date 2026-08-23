@@ -39,7 +39,7 @@ import {
 } from "../lib/factories";
 import type { SaveState } from "../lib/session";
 import { webPlatform } from "../lib/platform";
-import { captureSpacingForZoom, compactInkPoints } from "../lib/ink";
+import { captureSpacingForZoom, compactInkPoints, createInkStabilizer } from "../lib/ink";
 import {
   appendEraserPoint,
   eraseObjects,
@@ -547,15 +547,18 @@ export function EditorWorkspace(props: Props) {
     event.currentTarget.setPointerCapture(event.pointerId);
     if (isInkTool || isShapeDrawing) {
       clearStraightenGesture();
+      const preset = isShapeDrawing
+        ? BRUSHES[0]
+        : (BRUSHES.find((candidate) => candidate.id === brushId) ?? BRUSHES[0]);
+      const stabilizerState = createInkStabilizer(inkSmoothing);
       draftRef.current = {
-        points: [toInkPoint(event, point)],
+        points: [stabilizerState.push(toInkPoint(event, point))],
         tool: isShapeDrawing ? "pen" : (tool as DraftInk["tool"]),
         color: inkColor,
         size: tool === "highlighter" ? inkSize * 4 : inkSize,
-        smoothing: inkSmoothing,
-        captureZoom: cameraRef.current.zoom,
-        brushId: isShapeDrawing ? "ink-fineliner" : brushId,
-        dynamics: inkDynamics,
+        stabilizer: inkSmoothing,
+        brush: { ...preset.brush, dynamics: isShapeDrawing ? preset.brush.dynamics : inkDynamics },
+        stabilizerState,
         ...(isShapeDrawing ? { recognizeShape: true } : {})
       };
       setCanvasActive(true);
@@ -690,7 +693,8 @@ export function EditorWorkspace(props: Props) {
         draftRef.current.points,
         event,
         (sample) => interactionPointAt(sample, drawInset),
-        captureSpacing
+        captureSpacing,
+        draftRef.current.stabilizerState
       );
       const gesture = straightenGestureRef.current;
       const end = draftRef.current.points.at(-1);
@@ -775,7 +779,8 @@ export function EditorWorkspace(props: Props) {
           draft.points,
           event,
           (sample) => interactionPointAt(sample, drawInset),
-          captureSpacing
+          captureSpacing,
+          draft.stabilizerState
         );
       }
       if (draft.points.length > 0) {
@@ -794,11 +799,8 @@ export function EditorWorkspace(props: Props) {
           points,
           color: draft.color,
           size: draft.size,
-          tool: draft.tool,
-          smoothing: draft.smoothing,
-          captureZoom: draft.captureZoom,
-          brushId: draft.brushId,
-          dynamics: draft.dynamics
+          stabilizer: draft.stabilizer,
+          brush: draft.brush
         });
         props.onAdd(keepInsidePage(ink));
         if (draft.recognizeShape) {
@@ -1284,8 +1286,8 @@ export function EditorWorkspace(props: Props) {
               if (defaultBrush) {
                 setBrushId(defaultBrush.id);
                 setInkSize(defaultBrush.size);
-                setInkSmoothing(defaultBrush.smoothing);
-                setInkDynamics(defaultBrush.dynamics);
+                setInkSmoothing(defaultBrush.stabilizer);
+                setInkDynamics(defaultBrush.brush.dynamics);
               }
             }}
             onToggleBrushes={() => setShowBrushes((value) => !value)}
@@ -1411,8 +1413,8 @@ export function EditorWorkspace(props: Props) {
                 setTool(brush.tool);
                 setBrushId(brush.id);
                 setInkSize(brush.size);
-                setInkSmoothing(brush.smoothing);
-                setInkDynamics(brush.dynamics);
+                setInkSmoothing(brush.stabilizer);
+                setInkDynamics(brush.brush.dynamics);
                 setShowBrushes(false);
               }}
               onSize={setInkSize}

@@ -146,9 +146,6 @@ importers:
       pdfjs-dist:
         specifier: ^5.4.54
         version: 5.7.284
-      perfect-freehand:
-        specifier: ^1.2.2
-        version: 1.2.3
       react:
         specifier: ^19.1.1
         version: 19.2.8
@@ -2156,9 +2153,6 @@ packages:
   pdfjs-dist@5.7.284:
     resolution: {integrity: sha512-h4EdYQczmGhbOlqc3PPZwxevn7ApdWPbovAuWXOB/DjIyigSnwfy2oze7c6mRcSr9XgLp3eN3EeL4DyySTPMFw==}
     engines: {node: '>=22.13.0 || >=24'}
-
-  perfect-freehand@1.2.3:
-    resolution: {integrity: sha512-bHZSfqDHGNlPpgH2yxXgPHlQSPpEbo+qg7li0M78J9vNAi2yjwLeA4x79BEQhX44lEWpCLSFCeRZwpw0niiXPA==}
 
   performance-now@2.1.0:
     resolution: {integrity: sha512-7EAHlyLHI56VEIdK57uwHdHKIaAGbnXPiw0yWbarQZOKaKpvUIgW0jWRVLiatnM+XXlSwsanIBH/hzGMJulMow==}
@@ -4807,8 +4801,6 @@ snapshots:
   pdfjs-dist@5.7.284:
     optionalDependencies:
       '@napi-rs/canvas': 0.1.100
-
-  perfect-freehand@1.2.3: {}
 
   performance-now@2.1.0:
     optional: true

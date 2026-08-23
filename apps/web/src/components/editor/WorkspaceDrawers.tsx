@@ -12,6 +12,7 @@ import type { Tool } from "./types";
 import { BRUSHES, ICONS, type BrushPreset, type IconShape } from "./workspaceConstants";
 import { readStoredPoint } from "./preferences";
 import { t } from "../../i18n";
+import { drawBrushStroke } from "../canvas/brushEngine";
 
 interface Props {
   readonly tool: Tool;
@@ -228,11 +229,7 @@ export function WorkspaceDrawers({
                 aria-pressed={brushId === brush.id}
                 onClick={() => onBrush(brush)}
               >
-                <span
-                  className={`brush-preview brush-preview--${brush.texture}`}
-                  style={{ "--brush-size": `${Math.min(brush.size, 12)}px` } as CSSProperties}
-                  aria-hidden="true"
-                />
+                <BrushPreview preset={brush} selected={brushId === brush.id} />
                 <span className="brush-copy">
                   <strong>{brush.name}</strong>
                   <small>{brush.detail}</small>
@@ -287,4 +284,34 @@ export function WorkspaceDrawers({
       )}
     </>
   );
+}
+
+function BrushPreview({ preset, selected }: { readonly preset: BrushPreset; readonly selected: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.round(56 * dpr);
+    canvas.height = Math.round(24 * dpr);
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.scale(dpr, dpr);
+    const points = Array.from({ length: 14 }, (_, index) => ({
+      x: 3 + index * 3.9,
+      y: 13 - Math.sin((index / 13) * Math.PI) * 3,
+      pressure: 0.22 + (index / 13) * 0.68,
+      tiltX: 12,
+      tiltY: 36,
+      timestamp: index * 8
+    }));
+    drawBrushStroke(context, {
+      points,
+      color: selected ? "#f6f5f0" : "#292927",
+      size: Math.min(8, preset.size),
+      brush: preset.brush,
+      opacity: 1
+    });
+  }, [preset, selected]);
+  return <canvas ref={canvasRef} className="brush-preview" aria-hidden="true" />;
 }

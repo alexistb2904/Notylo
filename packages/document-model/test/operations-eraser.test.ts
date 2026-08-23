@@ -27,8 +27,13 @@ function sourceDocument(): { document: NotebookDocument; ink: InkObject } {
     ],
     color: "#000",
     size: 3,
-    tool: "pen",
-    smoothing: 0.5
+    stabilizer: 0.5,
+    brush: {
+      id: "test", tip: "round", spacing: 0.1, hardness: 1, flow: 1, opacity: 1,
+      aspect: 1, angle: 0, rotation: "fixed", scatter: 0, grain: 0, blendMode: "normal",
+      dynamics: { pressureSensitivity: 0.5, pressureAffectsWidth: true,
+        pressureAffectsOpacity: false, tiltAffectsAngle: false }
+    }
   };
   return {
     ink,

@@ -213,7 +213,7 @@ test("uses a thumb-friendly mobile tool dock and bottom sheets", async ({ page }
 
   const brushes = page.getByRole("dialog", { name: "Brosses et épaisseurs" });
   await expect(brushes).toBeVisible();
-  await expect(brushes.getByRole("button", { name: /^Crayon\b/i })).toBeVisible();
+  await expect(brushes.getByRole("button", { name: /^Crayon Graphite/i })).toBeVisible();
   const brushBox = await brushes.boundingBox();
   expect(brushBox).not.toBeNull();
   if (brushBox) expect(brushBox.y + brushBox.height).toBeLessThanOrEqual(dockBox.y - 2);
@@ -291,29 +291,37 @@ test("pans with the middle mouse button without drawing", async ({ page }) => {
   await expect(desktopTools.getByTitle("Stylo (P)")).toHaveAttribute("aria-pressed", "true");
 });
 
-test("renders live ink as vectors and keeps editor tools available", async ({ page }) => {
+test("renders stamp-mask ink on canvas and keeps editor tools available", async ({ page }) => {
   await createNotebook(page, "Ink E2E");
   const desktopTools = page.locator(".tool-rail");
 
   await drawStroke(page, 0);
   await expect.poll(() => storedInkCount(page)).toBe(1);
-  await expect(page.locator(".vector-object-layer path")).toHaveCount(1);
+  const inkSurface = page.locator(".ink-object-layer");
+  await expect(inkSurface).toBeVisible();
+  await expect.poll(() => inkSurface.evaluate((surface) => {
+    const canvas = surface as HTMLCanvasElement;
+    const context = canvas.getContext("2d");
+    if (!context) return false;
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    for (let index = 3; index < pixels.length; index += 4) if (pixels[index]) return true;
+    return false;
+  })).toBe(true);
 
   await desktopTools.getByTitle("Brosses").click();
   const brushDialog = page.getByRole("dialog", { name: "Brosses et épaisseurs" });
-  const pencilPreset = brushDialog.getByRole("button", { name: /^Crayon\b/i });
+  const pencilPreset = brushDialog.getByRole("button", { name: /^Crayon Graphite/i });
   await pencilPreset.click();
   await expect(desktopTools.getByTitle("Crayon")).toHaveAttribute("aria-pressed", "true");
 
   await drawStroke(page, 90);
   await expect.poll(() => storedInkCount(page)).toBe(2);
-  // Pen = one outline. Pencil = one outline + one vector graphite texture path.
-  await expect(page.locator(".vector-object-layer path")).toHaveCount(3);
+  await expect(page.locator(".ink-object-layer")).toHaveCount(1);
 
   await desktopTools.getByTitle("Brosses").click();
   await expect(
     page.getByRole("dialog", { name: "Brosses et épaisseurs" }).getByRole("button", {
-      name: /^Crayon\b/i
+      name: /^Crayon Graphite/i
     })
   ).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Fermer" }).click();

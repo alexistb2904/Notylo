@@ -1,7 +1,7 @@
 import type { Worker } from "tesseract.js";
 import type { DocumentObject, ImageObject } from "@notylo/document-model";
 import { NotebookRepository } from "@notylo/persistence";
-import { drawInkToCanvas } from "../components/canvas/inkVector";
+import { drawBrushStroke } from "../components/canvas/brushEngine";
 import { t } from "../i18n";
 
 export type OcrMode = "text" | "math";
@@ -72,7 +72,7 @@ export async function renderOcrSelection(selected: readonly DocumentObject[]): P
 
   for (const object of objects) {
     if (object.type === "ink") {
-      drawInkToCanvas(context, object, offset);
+      drawBrushStroke(context, object, offset, true);
       continue;
     }
     await drawImageObject(context, object, offset);
