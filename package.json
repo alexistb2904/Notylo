@@ -1,5 +1,6 @@
 {
   "name": "notylo-notes",
+  "version": "1.0.0",
   "private": true,
   "packageManager": "pnpm@11.19.0",
   "scripts": {
@@ -11,6 +12,8 @@
     "build:desktop:windows": "pnpm --dir apps/desktop build:windows",
     "build:desktop:linux": "pnpm --dir apps/desktop build:linux",
     "bundle:check": "node scripts/check-bundle-size.mjs",
+    "version:notylo": "node scripts/set-version.mjs",
+    "version:check": "node scripts/set-version.mjs --check",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "pnpm -r --if-present lint",
     "test": "pnpm -r --if-present test",
