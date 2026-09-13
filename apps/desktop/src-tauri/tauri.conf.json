@@ -24,7 +24,38 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: http: https: data: blob:; media-src 'self' http: https: data: blob:; connect-src 'self' http: https: ws: wss:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self' blob:; script-src 'self'"
+      "csp": {
+        "default-src": "'self'",
+        "connect-src": "'self' ipc: http://ipc.localhost https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*",
+        "img-src": "'self' asset: https: http://localhost:* http://127.0.0.1:* data: blob:",
+        "media-src": "'self' https: http://localhost:* http://127.0.0.1:* data: blob:",
+        "style-src": "'self' 'unsafe-inline'",
+        "font-src": "'self' data:",
+        "worker-src": "'self' blob:",
+        "script-src": "'self'",
+        "object-src": "'none'",
+        "frame-src": "'none'",
+        "base-uri": "'none'",
+        "form-action": "'self'"
+      },
+      "devCsp": {
+        "default-src": "'self'",
+        "connect-src": "'self' ipc: http://ipc.localhost http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* https: wss:",
+        "img-src": "'self' asset: http://localhost:* http://127.0.0.1:* https: data: blob:",
+        "media-src": "'self' http://localhost:* http://127.0.0.1:* https: data: blob:",
+        "style-src": "'self' 'unsafe-inline'",
+        "font-src": "'self' data:",
+        "worker-src": "'self' blob:",
+        "script-src": "'self'",
+        "object-src": "'none'",
+        "frame-src": "'none'",
+        "base-uri": "'none'",
+        "form-action": "'self'"
+      },
+      "headers": {
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer"
+      }
     }
   },
   "plugins": {
