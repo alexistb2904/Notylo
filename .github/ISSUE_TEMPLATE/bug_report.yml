@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a reproducible problem in Notylo
+title: "[Bug] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Please avoid including private notebook content, credentials, access tokens or other sensitive data.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Web / PWA
+        - Desktop (Windows)
+        - Desktop (Linux)
+        - API / cloud sync
+        - Import / export
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: App version, desktop release, or commit SHA if known.
+  - type: input
+    id: environment
+    attributes:
+      label: Browser / OS / device
+      placeholder: "Chrome 153 / Windows 11 / Surface Pen"
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Add logs, screenshots or recordings if useful. Remove secrets and private note content first.
