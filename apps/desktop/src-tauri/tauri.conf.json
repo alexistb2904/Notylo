@@ -53,8 +53,7 @@
         "form-action": "'self'"
       },
       "headers": {
-        "X-Content-Type-Options": "nosniff",
-        "Referrer-Policy": "no-referrer"
+        "X-Content-Type-Options": "nosniff"
       }
     }
   },

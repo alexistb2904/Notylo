@@ -28,8 +28,25 @@ if (!sources(security.csp["script-src"]).split(/\s+/).includes("'self'"))
 
 const headers = security.headers;
 if (!headers || typeof headers !== "object") fail("security headers are missing");
+const supportedHeaders = new Set([
+  "Access-Control-Allow-Credentials",
+  "Access-Control-Allow-Headers",
+  "Access-Control-Allow-Methods",
+  "Access-Control-Expose-Headers",
+  "Access-Control-Max-Age",
+  "Cross-Origin-Embedder-Policy",
+  "Cross-Origin-Opener-Policy",
+  "Cross-Origin-Resource-Policy",
+  "Permissions-Policy",
+  "Service-Worker-Allowed",
+  "Timing-Allow-Origin",
+  "X-Content-Type-Options",
+  "Tauri-Custom-Header"
+]);
+for (const header of Object.keys(headers)) {
+  if (!supportedHeaders.has(header)) fail(`unsupported Tauri security header: ${header}`);
+}
 if (headers["X-Content-Type-Options"] !== "nosniff") fail("X-Content-Type-Options must be nosniff");
-if (headers["Referrer-Policy"] !== "no-referrer") fail("Referrer-Policy must be no-referrer");
 
 console.log("Tauri security configuration is hardened.");
 
