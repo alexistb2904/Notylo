@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { KeyRound, LogOut, Pencil, Plus, ShieldCheck, Trash2, UserRound } from "lucide-react";
 import { Link, Navigate } from "react-router-dom";
 import { startRegistration } from "@simplewebauthn/browser";
+import { StorageStatusCard } from "../components/StorageStatusCard";
 import { api, isTauri, type Passkey } from "../lib/api";
 import { authErrorMessage, useAuth } from "../lib/auth";
 import { formatDate, t } from "../i18n";
@@ -140,6 +141,7 @@ export function ProfilePage() {
             )) : <p className="profile-muted">{t("profile.noPasskey")}</p>}
           </div>
         </section>
+        <StorageStatusCard />
         <section className="profile-card profile-danger" aria-labelledby="profile-delete-title">
           <div className="profile-card-heading"><Trash2 size={19} /><div><h2 id="profile-delete-title">{t("profile.deleteAccount")}</h2><p>{t("profile.deleteAccountDescription")}</p></div></div>
           <form onSubmit={(event) => { event.preventDefault(); void deleteAccount(); }}>
