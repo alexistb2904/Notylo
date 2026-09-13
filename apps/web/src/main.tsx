@@ -5,9 +5,11 @@ import "katex/dist/katex.min.css";
 import "./styles.css";
 import "./mobile-editor.css";
 import "./public-editor.css";
+import "./pwa-update.css";
 import { App } from "./App";
 import { AuthProvider } from "./lib/auth";
 import { applyDocumentLocale } from "./i18n";
+import { registerServiceWorker } from "./lib/serviceWorker";
 import { installVisualViewportHeightSync } from "./lib/viewport";
 
 applyDocumentLocale();
@@ -23,17 +25,4 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>
 );
 
-if ("serviceWorker" in navigator && import.meta.env.PROD) {
-  const isTauri = "__TAURI_INTERNALS__" in window;
-  if (isTauri) {
-    // Tauri already ships the complete frontend and persists notebooks via
-    // IndexedDB. A browser service worker only adds a stale-shell failure mode.
-    void navigator.serviceWorker.getRegistrations().then((registrations) => {
-      registrations.forEach((registration) => void registration.unregister());
-    });
-  } else {
-    void navigator.serviceWorker
-      .register("/sw.js", { updateViaCache: "none" })
-      .catch(() => undefined);
-  }
-}
+registerServiceWorker();

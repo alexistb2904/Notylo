@@ -2,6 +2,7 @@ import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthDialog } from "./components/AuthDialog";
 import { BrandMark } from "./components/BrandMark";
+import { PwaUpdatePrompt } from "./components/PwaUpdatePrompt";
 import { useAuth } from "./lib/auth";
 import { t } from "./i18n";
 
@@ -26,20 +27,23 @@ const authRequired = ["true", "1", "yes"].includes(
 
 export function App() {
   return (
-    <AccessGate>
-      <Suspense fallback={<LoadingState label={t("app.verifyingAccess")} />}>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/notebook/:id" element={<EditorPage />} />
-          {PenDebugPage && <Route path="/debug/pen" element={<PenDebugPage />} />}
-          {BenchmarkPage && <Route path="/debug/benchmark" element={<BenchmarkPage />} />}
-          <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/public/:token" element={<PublicPage />} />
-          <Route path="/desktop/passkey" element={<DesktopPasskeyPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Suspense>
-    </AccessGate>
+    <>
+      <AccessGate>
+        <Suspense fallback={<LoadingState label={t("app.verifyingAccess")} />}>
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/notebook/:id" element={<EditorPage />} />
+            {PenDebugPage && <Route path="/debug/pen" element={<PenDebugPage />} />}
+            {BenchmarkPage && <Route path="/debug/benchmark" element={<BenchmarkPage />} />}
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/public/:token" element={<PublicPage />} />
+            <Route path="/desktop/passkey" element={<DesktopPasskeyPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+      </AccessGate>
+      <PwaUpdatePrompt />
+    </>
   );
 }
 
