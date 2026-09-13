@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "notylo-shell-";
-const CACHE = `${CACHE_PREFIX}v2`;
+const CACHE = `${CACHE_PREFIX}v3`;
 const SHELL = ["/"];
 const STATIC_DESTINATIONS = new Set(["style", "script", "font", "image", "worker"]);
 
@@ -30,14 +30,16 @@ async function fetchAndCache(request, cacheKey = request) {
   return response;
 }
 
-self.addEventListener("install", (event) =>
-  event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((cache) => cache.addAll(SHELL))
-      .then(() => self.skipWaiting())
-  )
-);
+self.addEventListener("install", (event) => {
+  // Keep the new worker in the waiting state until the user explicitly accepts
+  // the update. This avoids replacing the active shell while old chunks are
+  // still executing in an open Notylo tab.
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") void self.skipWaiting();
+});
 
 self.addEventListener("activate", (event) =>
   event.waitUntil(
@@ -77,7 +79,5 @@ self.addEventListener("fetch", (event) => {
   // into the shared service-worker cache.
   if (!STATIC_DESTINATIONS.has(request.destination)) return;
 
-  event.respondWith(
-    caches.match(request).then((cached) => cached ?? fetchAndCache(request))
-  );
+  event.respondWith(caches.match(request).then((cached) => cached ?? fetchAndCache(request)));
 });
