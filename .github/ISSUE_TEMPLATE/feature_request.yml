@@ -1,0 +1,44 @@
+name: Feature request
+description: Suggest an improvement for Notylo
+title: "[Feature] "
+labels: []
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What limitation or workflow problem are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior you would like to see.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Area
+      options:
+        - Editor / canvas
+        - Notebook library
+        - Offline / local storage
+        - Cloud sync
+        - Import / export
+        - Web / PWA
+        - Desktop
+        - API / self-hosting
+        - Accessibility
+        - Other
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional. Mention workarounds or alternatives you have tried.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Mockups or examples are welcome. Do not include private notebook content or credentials.
