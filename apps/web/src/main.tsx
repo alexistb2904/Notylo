@@ -6,7 +6,9 @@ import "./styles.css";
 import "./mobile-editor.css";
 import "./public-editor.css";
 import "./pwa-update.css";
+import "./app-error.css";
 import { App } from "./App";
+import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import { AuthProvider } from "./lib/auth";
 import { applyDocumentLocale } from "./i18n";
 import { registerServiceWorker } from "./lib/serviceWorker";
@@ -17,11 +19,13 @@ installVisualViewportHeightSync();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <BrowserRouter>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    </BrowserRouter>
+    <AppErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </BrowserRouter>
+    </AppErrorBoundary>
   </StrictMode>
 );
 
