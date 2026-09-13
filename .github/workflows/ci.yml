@@ -28,6 +28,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm bundle:check
 
   e2e:
     runs-on: ubuntu-latest
