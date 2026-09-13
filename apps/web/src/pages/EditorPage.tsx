@@ -50,7 +50,7 @@ export function EditorPage() {
   if (!loaded)
     return (
       <main className="loading-state">
-        <span className="brand-mark">P</span>
+        <span className="brand-mark">N</span>
         <p>{t("editor.opening")}</p>
       </main>
     );
