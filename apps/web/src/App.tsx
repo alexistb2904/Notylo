@@ -27,7 +27,7 @@ const authRequired = ["true", "1", "yes"].includes(
 export function App() {
   return (
     <AccessGate>
-      <Suspense fallback={<LoadingState label={t("app.loading")} />}>
+      <Suspense fallback={<LoadingState label={t("app.verifyingAccess")} />}>
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/notebook/:id" element={<EditorPage />} />
