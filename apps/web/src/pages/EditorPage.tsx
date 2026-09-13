@@ -8,7 +8,7 @@ import { ShareDialog } from "../components/ShareDialog";
 import { useDocumentSession } from "../lib/session";
 import { useAuth } from "../lib/auth";
 import { ApiError } from "../lib/api";
-import { pullCloudDocument, resolveConflict, syncConflictFromError, uploadDocument, type SyncConflict } from "../lib/cloud";
+import { createCloudSyncEngine, type SyncConflict } from "../lib/syncEngine";
 import { formatDate, t } from "../i18n";
 
 export function EditorPage() {
@@ -61,6 +61,10 @@ function LoadedEditor({ initial, repository }: { readonly initial: NotebookDocum
   const navigate = useNavigate();
   const session = useDocumentSession(initial, repository);
   const { accessToken, user, refreshSession } = useAuth();
+  const syncEngine = useMemo(
+    () => (accessToken && user ? createCloudSyncEngine(accessToken, user.id) : undefined),
+    [accessToken, user]
+  );
   const accountAtOpen = useRef(user?.id);
   const latestDocument = useRef(session.document);
   const debounceTimer = useRef<number | undefined>(undefined);
@@ -83,7 +87,7 @@ function LoadedEditor({ initial, repository }: { readonly initial: NotebookDocum
   }, [navigate, user?.id]);
 
   const syncNow = useCallback(async () => {
-    if (!accessToken || !user || !navigator.onLine || conflictBlocked.current) return;
+    if (!syncEngine || !navigator.onLine || conflictBlocked.current) return;
     if (syncing.current) {
       syncAgain.current = true;
       return;
@@ -92,10 +96,10 @@ function LoadedEditor({ initial, repository }: { readonly initial: NotebookDocum
     window.clearTimeout(retryTimer.current);
     setCloudSaveState("saving");
     try {
-      await uploadDocument(accessToken, latestDocument.current, user.id);
+      await syncEngine.push(latestDocument.current);
       setCloudSaveState("cloud-synced");
     } catch (error) {
-      const detectedConflict = syncConflictFromError(error, latestDocument.current);
+      const detectedConflict = syncEngine.conflictFromError(error, latestDocument.current);
       if (detectedConflict) {
         conflictBlocked.current = true;
         setConflict(detectedConflict);
@@ -115,7 +119,7 @@ function LoadedEditor({ initial, repository }: { readonly initial: NotebookDocum
         debounceTimer.current = window.setTimeout(() => void syncNowRef.current(), 250);
       }
     }
-  }, [accessToken, refreshSession, user]);
+  }, [refreshSession, syncEngine]);
   syncNowRef.current = syncNow;
 
   useEffect(() => {
@@ -124,7 +128,7 @@ function LoadedEditor({ initial, repository }: { readonly initial: NotebookDocum
   }, [accessToken, user?.id]);
 
   useEffect(() => {
-    if (!accessToken || !user) return;
+    if (!syncEngine) return;
     if (suppressNextUpload.current) {
       suppressNextUpload.current = false;
       return;
@@ -132,15 +136,15 @@ function LoadedEditor({ initial, repository }: { readonly initial: NotebookDocum
     window.clearTimeout(debounceTimer.current);
     debounceTimer.current = window.setTimeout(() => void syncNowRef.current(), 1_800);
     return () => window.clearTimeout(debounceTimer.current);
-  }, [accessToken, user, session.document]);
+  }, [session.document, syncEngine]);
 
   useEffect(() => {
-    if (!accessToken || !user) return;
+    if (!syncEngine) return;
     let active = true;
     const pull = async () => {
       if (!active || syncing.current || conflictBlocked.current || document.visibilityState !== "visible") return;
       try {
-        const result = await pullCloudDocument(accessToken, user.id, latestDocument.current);
+        const result = await syncEngine.pull(latestDocument.current);
         if (!active) return;
         if (result.kind === "updated") {
           suppressNextUpload.current = true;
@@ -169,7 +173,7 @@ function LoadedEditor({ initial, repository }: { readonly initial: NotebookDocum
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, [accessToken, navigate, session.adopt, user]);
+  }, [navigate, session.adopt, syncEngine]);
 
   useEffect(() => {
     const handleOnline = () => {
@@ -185,10 +189,10 @@ function LoadedEditor({ initial, repository }: { readonly initial: NotebookDocum
   }, []);
 
   const resolveEditorConflict = async (keep: "local" | "cloud") => {
-    if (!accessToken || !user || !conflict) return;
+    if (!syncEngine || !conflict) return;
     setResolvingConflict(true);
     try {
-      await resolveConflict(accessToken, conflict, keep, user.id);
+      await syncEngine.resolveConflict(conflict, keep);
       if (keep === "cloud") {
         if (conflict.kind === "deleted") {
           navigate("/", { replace: true });
@@ -208,11 +212,11 @@ function LoadedEditor({ initial, repository }: { readonly initial: NotebookDocum
   };
 
   const openShare = async () => {
-    if (!accessToken || !user || sharePreparing) return;
+    if (!syncEngine || sharePreparing) return;
     setSharePreparing(true);
     setShareError(undefined);
     try {
-      await uploadDocument(accessToken, session.document, user.id);
+      await syncEngine.push(session.document);
       setShareOpen(true);
     } catch (error) {
       setShareError(error instanceof Error ? error.message : t("editor.shareNeedsSync"));
@@ -251,7 +255,7 @@ function LoadedEditor({ initial, repository }: { readonly initial: NotebookDocum
 
   return (
     <>
-      <EditorWorkspace document={session.document} documentRef={session.documentRef} saveState={accessToken && user ? cloudSaveState : session.saveState} onAdd={add} onUpdate={update} onDelete={remove} onAddPage={addPage} onUndo={session.undo} onRedo={session.redo} onReplace={session.replace} onShare={() => void openShare()} />
+      <EditorWorkspace document={session.document} documentRef={session.documentRef} saveState={syncEngine ? cloudSaveState : session.saveState} onAdd={add} onUpdate={update} onDelete={remove} onAddPage={addPage} onUndo={session.undo} onRedo={session.redo} onReplace={session.replace} onShare={() => void openShare()} />
       {sharePreparing && <p className="public-share-progress" role="status">{t("editor.preparingPublicLink")}</p>}
       {shareError && <p className="profile-notice error" role="alert">{shareError}</p>}
       {shareOpen && accessToken && <ShareDialog accessToken={accessToken} notebookId={session.document.notebook.id} onClose={() => setShareOpen(false)} />}
