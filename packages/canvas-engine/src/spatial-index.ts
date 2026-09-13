@@ -78,7 +78,8 @@ export class SpatialIndex<T extends BaseObject> {
 
     return [...candidateIds]
       .map((id) => this.values.get(id))
-      .filter((value): value is T => Boolean(value) && rectIntersects(bounds, objectRect(value)))
+      .filter((value): value is T => value !== undefined)
+      .filter((value) => rectIntersects(bounds, objectRect(value)))
       .sort(
         (a, b) =>
           (this.insertionOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
