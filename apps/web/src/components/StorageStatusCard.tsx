@@ -7,7 +7,7 @@ import "./StorageStatusCard.css";
 interface StorageStatus {
   readonly usage: number;
   readonly quota: number;
-  readonly persisted?: boolean;
+  readonly persisted: boolean | undefined;
 }
 
 export function StorageStatusCard() {
