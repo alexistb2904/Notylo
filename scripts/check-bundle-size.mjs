@@ -1,15 +1,16 @@
 import { readdir, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const distDir = new URL("../apps/web/dist/assets/", import.meta.url);
+const distDir = fileURLToPath(new URL("../apps/web/dist/assets/", import.meta.url));
 const maxChunkBytes = Number(process.env.NOTYLO_MAX_JS_CHUNK_BYTES ?? 1_200_000);
 
 async function collectJsFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
-    const path = join(directory.pathname, entry.name);
-    if (entry.isDirectory()) files.push(...(await collectJsFiles(new URL(`file://${path}/`))));
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...(await collectJsFiles(path)));
     else if (entry.isFile() && entry.name.endsWith(".js")) {
       const info = await stat(path);
       files.push({ path, bytes: info.size });
