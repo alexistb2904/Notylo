@@ -1,0 +1,34 @@
+.storage-status-details {
+  display: grid;
+  gap: 10px;
+}
+
+.storage-status-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 0.92rem;
+}
+
+.storage-status-summary span {
+  color: var(--muted, #6c6c68);
+}
+
+.storage-status-progress {
+  width: 100%;
+  height: 10px;
+  accent-color: currentColor;
+}
+
+.storage-status-warning {
+  font-weight: 600;
+}
+
+@media (max-width: 620px) {
+  .storage-status-summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+}
