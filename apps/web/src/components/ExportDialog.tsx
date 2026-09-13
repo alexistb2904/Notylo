@@ -1,6 +1,3 @@
-import html2canvas from "html2canvas";
-import { jsPDF } from "jspdf";
-import { createNotezip } from "@notylo/import-export";
 import type { NotebookDocument } from "@notylo/document-model";
 import { NotebookRepository } from "@notylo/persistence";
 import { webPlatform } from "../lib/platform";
@@ -18,6 +15,7 @@ export function ExportDialog({
   const capture = async () => {
     const surface = window.document.querySelector<HTMLElement>(".canvas-area");
     if (!surface) throw new Error(t("export.captureUnavailable"));
+    const { default: html2canvas } = await import("html2canvas");
     return html2canvas(surface, {
       backgroundColor: "#e4e8e5",
       scale: 2,
@@ -35,6 +33,7 @@ export function ExportDialog({
   };
   const pdf = async () => {
     const canvas = await capture();
+    const { jsPDF } = await import("jspdf");
     const pdfDocument = new jsPDF({
       orientation: canvas.width > canvas.height ? "landscape" : "portrait",
       unit: "px",
@@ -58,6 +57,7 @@ export function ExportDialog({
     ).filter((asset): asset is { metadata: NotebookDocument["assets"][number]; blob: Blob } =>
       Boolean(asset)
     );
+    const { createNotezip } = await import("@notylo/import-export");
     await webPlatform.saveFile(
       `${safeName(document.notebook.title)}.notezip`,
       await createNotezip(document, assets)
