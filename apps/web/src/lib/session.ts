@@ -31,7 +31,7 @@ export function useDocumentSession(
   const history = useRef(new TransactionHistory());
   const documentRef = useRef(document);
   const timer = useRef<number | undefined>(undefined);
-  const pendingSave = useRef<PendingSave>();
+  const pendingSave = useRef<PendingSave | undefined>(undefined);
   const writeChain = useRef<Promise<void>>(Promise.resolve());
   const mounted = useRef(true);
   documentRef.current = document;
@@ -154,13 +154,13 @@ export function useDocumentSession(
       void flushPendingSave();
     };
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") void flushPendingSave();
+      if (window.document.visibilityState === "hidden") void flushPendingSave();
     };
 
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
     window.addEventListener("pagehide", handlePageHide);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.document.addEventListener("visibilitychange", handleVisibilityChange);
     const snapshot = window.setInterval(() => {
       void repository.snapshot(documentRef.current);
     }, 60_000);
@@ -169,7 +169,7 @@ export function useDocumentSession(
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener("pagehide", handlePageHide);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.clearInterval(snapshot);
       void flushPendingSave(false);
     };
