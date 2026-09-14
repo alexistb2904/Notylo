@@ -1,6 +1,7 @@
 services:
   minio:
-    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    # Use MinIO's Quay registry; the Docker Hub repository is unavailable.
+    image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
     restart: unless-stopped
     command: server /data
     environment:
@@ -29,6 +30,7 @@ services:
       MINIO_BUCKET: ${MINIO_BUCKET:-notylo-assets}
       WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:?Set WEBAUTHN_RP_ID to the public domain}
       WEBAUTHN_ORIGIN: ${WEBAUTHN_ORIGIN:?Set WEBAUTHN_ORIGIN to the public HTTPS origin}
+      DESKTOP_PASSKEY_URL: ${DESKTOP_PASSKEY_URL:-${WEBAUTHN_ORIGIN}/desktop/passkey}
     expose:
       - "3001"
     depends_on:

@@ -178,3 +178,5 @@ docker compose down -v
 ### Public self-hosting
 
 For a public HTTPS deployment, use docker-compose.coolify.yml with Coolify or another Docker Compose host. Configure a real PostgreSQL database, strong secrets, the public CORS_ORIGIN, WEBAUTHN_RP_ID and WEBAUTHN_ORIGIN, then expose only the web service through HTTPS. Never use the development defaults on an internet-facing installation.
+
+The Coolify stack pulls MinIO from `quay.io/minio/minio` because its Docker Hub repository is unavailable. `DESKTOP_PASSKEY_URL` defaults to `${WEBAUTHN_ORIGIN}/desktop/passkey`; set it explicitly in Coolify if the desktop passkey page uses a different URL.

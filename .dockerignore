@@ -6,6 +6,7 @@ node_modules
 **/node_modules
 dist
 **/dist
+apps/desktop/src-tauri/target
 coverage
 playwright-report
 test-results
