@@ -1,11 +1,22 @@
 import { useEffect, useState } from "react";
-import { KeyRound, LogOut, Pencil, Plus, ShieldCheck, Trash2, UserRound } from "lucide-react";
+import { KeyRound, Languages, LogOut, Pencil, Plus, ShieldCheck, Trash2, UserRound } from "lucide-react";
 import { Link, Navigate } from "react-router-dom";
 import { startRegistration } from "@simplewebauthn/browser";
 import { StorageStatusCard } from "../components/StorageStatusCard";
 import { api, isTauri, type Passkey } from "../lib/api";
 import { authErrorMessage, useAuth } from "../lib/auth";
-import { formatDate, t } from "../i18n";
+import {
+  formatDate,
+  readLocalePreference,
+  setLocalePreference,
+  t,
+  type LocalePreference
+} from "../i18n";
+import {
+  readThemePreference,
+  setThemePreference,
+  type ThemePreference
+} from "../lib/preferences";
 
 type Notice = { readonly kind: "success" | "error"; readonly message: string } | undefined;
 
@@ -19,6 +30,8 @@ export function ProfilePage() {
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [notice, setNotice] = useState<Notice>();
   const [pending, setPending] = useState<string>();
+  const [themePreference, setSelectedTheme] = useState<ThemePreference>(readThemePreference);
+  const localePreference = readLocalePreference();
 
   const loadPasskeys = async () => {
     if (!accessToken) return;
@@ -90,6 +103,10 @@ export function ProfilePage() {
     await logout();
   });
   const deleteKeyword = t("profile.deleteKeyword");
+  const changeTheme = (preference: ThemePreference) => {
+    setSelectedTheme(preference);
+    setThemePreference(preference);
+  };
 
   return (
     <main className="profile-shell">
@@ -121,6 +138,25 @@ export function ProfilePage() {
             <label>{t("profile.confirmPassword")}<input type="password" minLength={10} autoComplete="new-password" value={password.confirmation} onChange={(event) => setPassword({ ...password, confirmation: event.target.value })} required /></label>
             <button className="outline-action" disabled={pending === "password"} type="submit">{pending === "password" ? t("profile.updating") : t("profile.changePassword")}</button>
           </form>
+        </section>
+        <section className="profile-card profile-card-wide" aria-labelledby="profile-preferences-title">
+          <div className="profile-card-heading"><Languages size={19} /><div><h2 id="profile-preferences-title">{t("profile.preferences")}</h2><p>{t("profile.preferencesDescription")}</p></div></div>
+          <div className="profile-preferences-form">
+            <label>{t("profile.language")}
+              <select value={localePreference} onChange={(event) => setLocalePreference(event.target.value as LocalePreference)}>
+                <option value="system">{t("profile.languageSystem")}</option>
+                <option value="fr">Français</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+            <label>{t("profile.theme")}
+              <select value={themePreference} onChange={(event) => changeTheme(event.target.value as ThemePreference)}>
+                <option value="system">{t("profile.themeSystem")}</option>
+                <option value="light">{t("profile.themeLight")}</option>
+                <option value="dark">{t("profile.themeDark")}</option>
+              </select>
+            </label>
+          </div>
         </section>
         <section className="profile-card profile-card-wide" aria-labelledby="profile-passkeys-title">
           <div className="profile-card-heading"><KeyRound size={19} /><div><h2 id="profile-passkeys-title">{t("profile.passkeys")}</h2><p>{t("profile.passkeysDescription")}</p></div></div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectLocale } from "./index";
+import { detectLocale, resolveLocale } from "./index";
 
 describe("detectLocale", () => {
   it("uses French for French browser locales", () => {
@@ -21,5 +21,16 @@ describe("detectLocale", () => {
     expect(detectLocale(["de-DE"])).toBe("en");
     expect(detectLocale(["ja-JP", "es-ES"])).toBe("en");
     expect(detectLocale([])).toBe("en");
+  });
+});
+
+describe("resolveLocale", () => {
+  it("uses an explicit preference instead of the browser locale", () => {
+    expect(resolveLocale("fr", ["en-US"])).toBe("fr");
+    expect(resolveLocale("en", ["fr-FR"])).toBe("en");
+  });
+
+  it("follows the browser when the preference is system", () => {
+    expect(resolveLocale("system", ["fr-CA"])).toBe("fr");
   });
 });

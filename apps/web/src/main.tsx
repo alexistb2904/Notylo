@@ -13,7 +13,9 @@ import { AuthProvider } from "./lib/auth";
 import { applyDocumentLocale } from "./i18n";
 import { registerServiceWorker } from "./lib/serviceWorker";
 import { installVisualViewportHeightSync } from "./lib/viewport";
+import { applyThemePreference } from "./lib/preferences";
 
+applyThemePreference();
 applyDocumentLocale();
 installVisualViewportHeightSync();
 

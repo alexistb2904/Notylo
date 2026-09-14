@@ -2579,6 +2579,12 @@ input:focus-visible,
   gap: 14px;
   max-width: 560px;
 }
+.profile-preferences-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  max-width: 720px;
+}
 .profile-card label {
   display: grid;
   gap: 6px;
@@ -2586,7 +2592,8 @@ input:focus-visible,
   font-size: 12px;
   font-weight: 700;
 }
-.profile-card label input {
+.profile-card label input,
+.profile-card label select {
   width: 100%;
   box-sizing: border-box;
   padding: 10px 11px;
@@ -2602,7 +2609,8 @@ input:focus-visible,
   color: var(--tone-850);
   background: var(--tone-100);
 }
-.profile-card label input:focus {
+.profile-card label input:focus,
+.profile-card label select:focus {
   outline: 3px solid var(--tone-shadow);
   border-color: var(--tone-950);
 }
@@ -2743,7 +2751,7 @@ input:focus-visible,
   font-size: 12px;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     color-scheme: dark;
   }
   .home-shell,
@@ -5371,6 +5379,45 @@ input:focus-visible,
   --paper-margin-line: #bdbdb8;
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink-strong: #efefea;
+  --ink: #d8d8d2;
+  --ink-muted: #aaa9a3;
+  --ink-faint: #7d7d78;
+  --line: #40403c;
+  --line-strong: #5b5b55;
+  --surface: #222220;
+  --surface-soft: #181817;
+  --surface-tint: #2d2d2a;
+  --surface-raised: #292927;
+  --surface-dark: #31312e;
+  --surface-dark-soft: #454540;
+  --focus: #c7c7c0;
+  --tone-950: #efefea;
+  --tone-850: #d8d8d2;
+  --tone-700: #aaa9a3;
+  --tone-500: #7d7d78;
+  --tone-300: #40403c;
+  --tone-100: #20201e;
+  --tone-shadow: #00000042;
+  --tone-highlight: #efefea1c;
+  --ink-inverse: #efefea;
+  --button-hover: #5a5a54;
+  --overlay: #161615c7;
+  --canvas: #2b2b28;
+  --canvas-dot: #98989142;
+  --header-line: #40403c;
+  --control: #3a3a36;
+  --control-hover: #4a4a45;
+  --paper-grid-line: #d7d7d3;
+  --paper-margin-line: #bdbdb8;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
 body,
 .home-shell,
 .profile-shell,
@@ -5546,7 +5593,7 @@ body,
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     color-scheme: dark;
     --ink-strong: #efefea;
     --ink: #d8d8d2;
@@ -5647,6 +5694,10 @@ body,
 
 /* Keep the responsive navigation last: this stylesheet also contains legacy page rules. */
 @media (max-width: 760px) {
+  .profile-preferences-form {
+    grid-template-columns: 1fr;
+  }
+
   .home-sidebar {
     position: sticky;
     z-index: 20;

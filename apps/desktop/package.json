@@ -3,10 +3,16 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "cd src-tauri && node ../../web/node_modules/@tauri-apps/cli/tauri.js dev",
+    "tauri": "tauri",
+    "dev": "tauri dev",
     "dev:desktop": "pnpm dev",
-    "build": "cd src-tauri && node ../../web/node_modules/@tauri-apps/cli/tauri.js build",
-    "build:windows": "cd src-tauri && node ../../web/node_modules/@tauri-apps/cli/tauri.js build --bundles nsis",
-    "build:linux": "cd src-tauri && node ../../web/node_modules/@tauri-apps/cli/tauri.js build --bundles appimage,deb"
+    "build": "tauri build",
+    "build:windows": "tauri build --bundles nsis",
+    "build:linux": "tauri build --bundles appimage,deb",
+    "build:android": "tauri android build --apk --ci --target aarch64",
+    "build:android:debug": "tauri android build --debug --apk --ci --target aarch64"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
   }
 }

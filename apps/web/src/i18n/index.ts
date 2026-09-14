@@ -1,4 +1,7 @@
 export type Locale = "en" | "fr";
+export type LocalePreference = Locale | "system";
+
+const localeStorageKey = "notylo-locale";
 
 const en = {
   "meta.description": "Notylo — your notebooks, without friction.",
@@ -175,6 +178,14 @@ const en = {
   "profile.backNotebooks": "← My notebooks",
   "profile.title": "Profile and security",
   "profile.intro": "Manage your identity, sign-in methods and cloud data.",
+  "profile.preferences": "Preferences",
+  "profile.preferencesDescription": "Choose the language and appearance used on this device.",
+  "profile.language": "Language",
+  "profile.languageSystem": "Use device language",
+  "profile.theme": "Theme",
+  "profile.themeSystem": "Use device theme",
+  "profile.themeLight": "Light",
+  "profile.themeDark": "Dark",
   "profile.profile": "Profile",
   "profile.profileDescription": "Your information visible in Notylo.",
   "profile.displayName": "Display name",
@@ -675,6 +686,14 @@ const fr: Record<MessageKey, string> = {
   "profile.backNotebooks": "← Mes cahiers",
   "profile.title": "Profil et sécurité",
   "profile.intro": "Gérez votre identité, vos méthodes de connexion et vos données cloud.",
+  "profile.preferences": "Préférences",
+  "profile.preferencesDescription": "Choisissez la langue et l’apparence utilisées sur cet appareil.",
+  "profile.language": "Langue",
+  "profile.languageSystem": "Langue de l’appareil",
+  "profile.theme": "Thème",
+  "profile.themeSystem": "Thème de l’appareil",
+  "profile.themeLight": "Clair",
+  "profile.themeDark": "Sombre",
   "profile.profile": "Profil",
   "profile.profileDescription": "Vos informations visibles dans Notylo.",
   "profile.displayName": "Nom affiché",
@@ -1014,7 +1033,33 @@ function browserLanguages(): readonly string[] {
   return navigator.language ? [navigator.language] : [];
 }
 
-export const locale: Locale = detectLocale();
+export function readLocalePreference(): LocalePreference {
+  try {
+    const value = localStorage.getItem(localeStorageKey);
+    return value === "en" || value === "fr" ? value : "system";
+  } catch {
+    return "system";
+  }
+}
+
+export function setLocalePreference(preference: LocalePreference): void {
+  try {
+    if (preference === "system") localStorage.removeItem(localeStorageKey);
+    else localStorage.setItem(localeStorageKey, preference);
+  } catch {
+    // Reloading still applies the browser locale if storage is unavailable.
+  }
+  if (typeof window !== "undefined") window.location.reload();
+}
+
+export function resolveLocale(
+  preference: LocalePreference,
+  languages: readonly string[] = browserLanguages()
+): Locale {
+  return preference === "system" ? detectLocale(languages) : preference;
+}
+
+export const locale: Locale = resolveLocale(readLocalePreference());
 export const intlLocale = locale === "fr" ? "fr-FR" : "en-US";
 
 export function t(key: MessageKey, values: Readonly<Record<string, string | number>> = {}): string {

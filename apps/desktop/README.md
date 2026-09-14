@@ -84,3 +84,23 @@ Les artefacts sont écrits dans `output/desktop-bundles/`; ainsi la construction
 Linux n'altère ni les dépendances ni les liens `node_modules` de Windows.
 Le conteneur sert à construire Linux ; l'installateur Windows doit être généré
 depuis Windows afin d'utiliser les outils MSVC et WebView2.
+
+## Android 16
+
+Le projet Android généré cible Android 16 (`compileSdk` et `targetSdk` 36) et
+embarque les icônes Notylo présentes dans `src-tauri/icons/android`. Il requiert
+Java 21, le SDK Android 36, le NDK Android et les cibles Rust Android installées
+avec `rustup`. Les cibles Android appliquent aussi l'alignement ELF 16 Kio requis
+par les appareils Android récents.
+
+Pour générer un APK ARM64 directement installable, signé avec la clé de debug
+Android :
+
+```bash
+pnpm build:android:debug
+```
+
+L'APK est créé dans
+`src-tauri/gen/android/app/build/outputs/apk/universal/debug/`. La commande
+`pnpm build:android` produit la variante release ; sa distribution nécessite
+une clé de signature de production.

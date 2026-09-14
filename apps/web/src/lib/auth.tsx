@@ -40,6 +40,19 @@ const refreshIntervalMs = 10 * 60 * 1000;
 const desktopFlowStorageKey = "notylo-desktop-passkey-flow";
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
+function persistentTauriStorage(): Storage {
+  return isTauri ? localStorage : sessionStorage;
+}
+
+function removeStoredValue(key: string): void {
+  try {
+    persistentTauriStorage().removeItem(key);
+    if (isTauri) sessionStorage.removeItem(key);
+  } catch {
+    // Authentication state is still cleared in memory if storage is unavailable.
+  }
+}
+
 type DesktopPasskeyFlow = {
   readonly state: string;
   readonly kind: "login" | "registration";
@@ -65,7 +78,11 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
       refreshToken: result.refreshToken,
       user: result.user
     };
-    sessionStorage.setItem(storageKey, JSON.stringify(session));
+    try {
+      persistentTauriStorage().setItem(storageKey, JSON.stringify(session));
+    } catch {
+      // Keep the active in-memory session even if persistent storage is unavailable.
+    }
     try {
       localStorage.setItem(offlineAccessKey, "1");
     } catch {
@@ -77,7 +94,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   }, []);
 
   const clear = useCallback(() => {
-    sessionStorage.removeItem(storageKey);
+    removeStoredValue(storageKey);
     try {
       localStorage.removeItem(offlineAccessKey);
     } catch {
@@ -108,7 +125,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
       if (!stored || stored.state !== state) return;
       const pending = desktopFlows.current.get(state);
       const settle = (error?: unknown) => {
-        sessionStorage.removeItem(desktopFlowStorageKey);
+        removeStoredValue(desktopFlowStorageKey);
         if (!pending) return;
         window.clearTimeout(pending.timeout);
         desktopFlows.current.delete(state);
@@ -159,11 +176,11 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     ): Promise<void> => {
       const state = randomDesktopState();
       const flow: DesktopPasskeyFlow = { state, kind };
-      sessionStorage.setItem(desktopFlowStorageKey, JSON.stringify(flow));
+      persistentTauriStorage().setItem(desktopFlowStorageKey, JSON.stringify(flow));
       const completion = new Promise<void>((resolve, reject) => {
         const timeout = window.setTimeout(() => {
           desktopFlows.current.delete(state);
-          sessionStorage.removeItem(desktopFlowStorageKey);
+          removeStoredValue(desktopFlowStorageKey);
           reject(new Error(t("auth.loginFailed")));
         }, 5 * 60_000);
         desktopFlows.current.set(state, { ...flow, resolve, reject, timeout });
@@ -177,7 +194,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
         if (pending) {
           window.clearTimeout(pending.timeout);
           desktopFlows.current.delete(state);
-          sessionStorage.removeItem(desktopFlowStorageKey);
+          removeStoredValue(desktopFlowStorageKey);
           pending.reject(error);
         }
       }
@@ -308,7 +325,8 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   const updateUser = useCallback((nextUser: Account) => {
     setUser(nextUser);
     const stored = readStoredSession();
-    if (stored) sessionStorage.setItem(storageKey, JSON.stringify({ ...stored, user: nextUser }));
+    if (stored)
+      persistentTauriStorage().setItem(storageKey, JSON.stringify({ ...stored, user: nextUser }));
   }, []);
 
   const value = useMemo(
@@ -363,9 +381,9 @@ export function authErrorMessage(error: unknown): string {
 
 function readStoredSession(): StoredSession | undefined {
   try {
-    const value = JSON.parse(
-      sessionStorage.getItem(storageKey) ?? "null"
-    ) as Partial<StoredSession> | null;
+    const storage = persistentTauriStorage();
+    const serialized = storage.getItem(storageKey) ?? (isTauri ? sessionStorage.getItem(storageKey) : null);
+    const value = JSON.parse(serialized ?? "null") as Partial<StoredSession> | null;
     if (typeof value?.accessToken !== "string" || typeof value.refreshToken !== "string")
       return undefined;
 
@@ -377,13 +395,15 @@ function readStoredSession(): StoredSession | undefined {
         ? value.user
         : undefined;
 
-    return {
+    const session = {
       accessToken: value.accessToken,
       refreshToken: value.refreshToken,
       ...(account ? { user: account } : {})
     };
+    if (isTauri && !storage.getItem(storageKey)) storage.setItem(storageKey, JSON.stringify(session));
+    return session;
   } catch {
-    sessionStorage.removeItem(storageKey);
+    removeStoredValue(storageKey);
     return undefined;
   }
 }
@@ -399,7 +419,7 @@ function randomDesktopState(): string {
 
 function readDesktopPasskeyFlow(): DesktopPasskeyFlow | undefined {
   try {
-    const value = JSON.parse(sessionStorage.getItem(desktopFlowStorageKey) ?? "null") as Partial<DesktopPasskeyFlow> | null;
+    const value = JSON.parse(persistentTauriStorage().getItem(desktopFlowStorageKey) ?? "null") as Partial<DesktopPasskeyFlow> | null;
     return value && typeof value.state === "string" && (value.kind === "login" || value.kind === "registration")
       ? { state: value.state, kind: value.kind }
       : undefined;

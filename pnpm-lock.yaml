@@ -79,7 +79,11 @@ importers:
         specifier: ^5.9.2
         version: 5.9.3
 
-  apps/desktop: {}
+  apps/desktop:
+    devDependencies:
+      '@tauri-apps/cli':
+        specifier: ^2.11.4
+        version: 2.11.4
 
   apps/web:
     dependencies:

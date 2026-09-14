@@ -59,6 +59,12 @@
   },
   "plugins": {
     "deep-link": {
+      "mobile": [
+        {
+          "scheme": ["notylo"],
+          "appLink": false
+        }
+      ],
       "desktop": {
         "schemes": ["notylo"]
       }
