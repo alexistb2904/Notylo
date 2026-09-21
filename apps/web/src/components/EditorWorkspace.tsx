@@ -501,12 +501,15 @@ export function EditorWorkspace(props: Props) {
       if (rejectAsPalm) {
         ignoredTouchPointers.current.add(event.pointerId);
         event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
         return;
       }
 
       const touchNavigates = readOnly || (stylusOnly && (isInkTool || tool === "eraser"));
       if (touchNavigates && !readOnly && activePenPointers.current.size > 0) {
+        ignoredTouchPointers.current.add(event.pointerId);
         event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
         return;
       }
 
