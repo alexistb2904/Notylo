@@ -786,7 +786,7 @@ export function EditorWorkspace(props: Props) {
       }
       if (tool === "eraser" || shortcutDown)
         updateEraserCursor(event, shortcutDown && tool !== "eraser");
-      else if (tool !== "eraser") setEraserCursor(undefined);
+      else setEraserCursor(undefined);
     } else if (tool === "eraser") {
       updateEraserCursor(event, false);
     }
