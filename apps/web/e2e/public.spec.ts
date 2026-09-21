@@ -114,6 +114,26 @@ test("public read-only link is mobile-friendly and pans with one finger", async 
   await expect.poll(() => documentTransform(page)).not.toBe(before);
 });
 
+test("does not pan the canvas for small touch jitter", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockPublicNotebook(page, "read-touch-jitter", "read");
+  await page.goto("/public/read-touch-jitter");
+
+  const canvas = page.locator(".canvas-area");
+  const canvasBox = await canvas.boundingBox();
+  expect(canvasBox).not.toBeNull();
+  if (!canvasBox) return;
+
+  const before = await documentTransform(page);
+  const start = {
+    x: canvasBox.x + canvasBox.width * 0.52,
+    y: canvasBox.y + canvasBox.height * 0.44
+  };
+  await touchDrag(page, start, { x: start.x + 3, y: start.y + 2 });
+
+  await expect.poll(() => documentTransform(page)).toBe(before);
+});
+
 test("stylus-only mode reserves pen for ink and lets one finger pan", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.addInitScript(() => localStorage.setItem("notylo-stylus-only", "true"));
