@@ -319,6 +319,55 @@ test("previews an already placed vector shape while it is being dragged", async 
   expect(liveTransform).not.toBeNull();
 });
 
+test("shows a temporary eraser cursor for the stylus side button", async ({ page }) => {
+  await createNotebook(page, "Stylus eraser E2E");
+  const desktopTools = page.locator(".tool-rail");
+  const penButton = desktopTools.getByTitle("Stylo (P)");
+  await expect(penButton).toHaveAttribute("aria-pressed", "true");
+
+  const canvas = page.locator(".canvas-area");
+  const canvasBox = await canvas.boundingBox();
+  expect(canvasBox).not.toBeNull();
+  if (!canvasBox) return;
+  const point = {
+    x: canvasBox.x + canvasBox.width * 0.58,
+    y: canvasBox.y + canvasBox.height * 0.42
+  };
+
+  await canvas.dispatchEvent("pointermove", {
+    pointerType: "pen",
+    pointerId: 41,
+    button: -1,
+    buttons: 2,
+    pressure: 0,
+    clientX: point.x,
+    clientY: point.y
+  });
+
+  const cursor = page.locator(".eraser-cursor");
+  await expect(cursor).toBeVisible();
+  await expect(cursor).toHaveAttribute("data-temporary", "true");
+  const cursorBox = await cursor.boundingBox();
+  expect(cursorBox).not.toBeNull();
+  if (cursorBox) {
+    expect(cursorBox.width).toBeGreaterThan(10);
+    expect(Math.abs(cursorBox.width - cursorBox.height)).toBeLessThan(1);
+  }
+  await expect(penButton).toHaveAttribute("aria-pressed", "true");
+
+  await canvas.dispatchEvent("pointermove", {
+    pointerType: "pen",
+    pointerId: 41,
+    button: -1,
+    buttons: 0,
+    pressure: 0,
+    clientX: point.x,
+    clientY: point.y
+  });
+  await expect(cursor).toBeHidden();
+  await expect(penButton).toHaveAttribute("aria-pressed", "true");
+});
+
 test("pans with the middle mouse button without drawing", async ({ page }) => {
   await createNotebook(page, "Middle pan E2E");
   const desktopTools = page.locator(".tool-rail");
