@@ -808,6 +808,20 @@ input:focus-visible,
   background-image: radial-gradient(var(--tone-highlight) 0.65px, transparent 0.65px);
   background-size: 16px 16px;
 }
+.eraser-cursor {
+  position: absolute;
+  z-index: 7;
+  box-sizing: border-box;
+  pointer-events: none;
+  border: 1.5px solid var(--ink-strong);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--surface-raised) 18%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--surface-raised) 72%, transparent);
+  transform: translate(-50%, -50%);
+}
+.eraser-cursor[data-temporary="true"] {
+  border-style: dashed;
+}
 .floating-palette,
 .brush-drawer,
 .icon-drawer {
