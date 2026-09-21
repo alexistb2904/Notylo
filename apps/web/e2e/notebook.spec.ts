@@ -367,29 +367,40 @@ test("hides the native cursor for pen and touch but restores it for mouse", asyn
   await expect.poll(() => canvas.evaluate((element) => getComputedStyle(element).cursor)).not.toBe("none");
 });
 
-test("shows a temporary eraser cursor for the stylus side button", async ({ page }) => {
+test("stylus side button previews and actually erases while keeping the pen selected", async ({ page }) => {
   await createNotebook(page, "Stylus eraser E2E");
   const desktopTools = page.locator(".tool-rail");
   const penButton = desktopTools.getByTitle("Stylo (P)");
   await expect(penButton).toHaveAttribute("aria-pressed", "true");
 
-  const canvas = page.locator(".canvas-area");
-  const canvasBox = await canvas.boundingBox();
-  expect(canvasBox).not.toBeNull();
-  if (!canvasBox) return;
-  const point = {
-    x: canvasBox.x + canvasBox.width * 0.58,
-    y: canvasBox.y + canvasBox.height * 0.42
-  };
+  await drawStroke(page, 0);
+  await expect.poll(() => storedInkCount(page)).toBe(1);
 
+  const visible = await visiblePaperRect(page);
+  const strokeStart = {
+    x: Math.min(visible.right - 190, visible.left + 100),
+    y: Math.max(
+      visible.top + 35,
+      Math.min(visible.bottom - 35, visible.box.y + 100)
+    )
+  };
+  const erasePoint = {
+    x: strokeStart.x + 70,
+    y: strokeStart.y + 18
+  };
+  const canvas = page.locator(".canvas-area");
+
+  // Many pens report the side button while hovering first. Remembering this
+  // state is important because the subsequent tip pointerdown may only report
+  // the primary contact button.
   await canvas.dispatchEvent("pointermove", {
     pointerType: "pen",
     pointerId: 41,
     button: -1,
     buttons: 2,
     pressure: 0,
-    clientX: point.x,
-    clientY: point.y
+    clientX: erasePoint.x,
+    clientY: erasePoint.y
   });
 
   const cursor = page.locator(".eraser-cursor");
@@ -401,19 +412,40 @@ test("shows a temporary eraser cursor for the stylus side button", async ({ page
     expect(cursorBox.width).toBeGreaterThan(10);
     expect(Math.abs(cursorBox.width - cursorBox.height)).toBeLessThan(1);
   }
-  await expect(penButton).toHaveAttribute("aria-pressed", "true");
 
+  // Reproduce a stylus that no longer exposes the side-button bit on tip-down:
+  // Notylo must still enter a real erase gesture, not only show the radius.
+  await canvas.dispatchEvent("pointerdown", {
+    pointerType: "pen",
+    pointerId: 41,
+    button: 0,
+    buttons: 1,
+    pressure: 0.6,
+    clientX: erasePoint.x,
+    clientY: erasePoint.y
+  });
   await canvas.dispatchEvent("pointermove", {
     pointerType: "pen",
     pointerId: 41,
     button: -1,
+    buttons: 3,
+    pressure: 0.6,
+    clientX: erasePoint.x + 4,
+    clientY: erasePoint.y + 2
+  });
+  await canvas.dispatchEvent("pointerup", {
+    pointerType: "pen",
+    pointerId: 41,
+    button: 0,
     buttons: 0,
     pressure: 0,
-    clientX: point.x,
-    clientY: point.y
+    clientX: erasePoint.x + 4,
+    clientY: erasePoint.y + 2
   });
-  await expect(cursor).toBeHidden();
+
+  await expect.poll(() => storedInkCount(page)).toBe(0);
   await expect(penButton).toHaveAttribute("aria-pressed", "true");
+  await expect(cursor).toBeHidden();
 });
 
 test("pans with the middle mouse button without drawing", async ({ page }) => {

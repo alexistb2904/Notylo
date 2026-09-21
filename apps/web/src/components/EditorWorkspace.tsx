@@ -478,6 +478,92 @@ export function EditorWorkspace(props: Props) {
     );
   };
 
+  const startEraserGesture = (point: Point, timeStamp: number) => {
+    const erasePageId = interactionPageRef.current?.id;
+    const source = props.documentRef.current.objects.filter((object) =>
+      document.notebook.mode === "whiteboard" ? !object.pageId : object.pageId === erasePageId
+    );
+    const sourceIndex = new CanvasEngine();
+    sourceIndex.setObjects(source);
+    engine.current.select([]);
+    syncSelection();
+    eraserGestureRef.current = {
+      baseDocument: props.documentRef.current,
+      path: [point],
+      sourceIndex,
+      result: { before: [], after: [] }
+    };
+    eraserLastApplyAt.current = timeStamp;
+    dragRef.current = { kind: "erase", start: point };
+    setCanvasActive(true);
+    previewEraserGesture();
+  };
+
+  const finishInkDraft = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const draft = draftRef.current;
+    if (!draft) {
+      clearStraightenGesture();
+      return;
+    }
+    const straightenGesture = straightenGestureRef.current;
+    const snappedToLine =
+      straightenGesture?.pointerId === event.pointerId && draft.straightLine;
+    clearStraightenGesture();
+    draftRef.current = undefined;
+    if (!snappedToLine) {
+      const drawInset = draft.size / 2 + 2;
+      const captureSpacing = captureSpacingForZoom(cameraRef.current.zoom, draft.size);
+      appendCoalescedInkPoints(
+        draft.points,
+        event,
+        (sample) => interactionPointAt(sample, drawInset),
+        captureSpacing,
+        draft.stabilizerState
+      );
+      const finishingPoints = draft.stabilizerState.finish();
+      finishingPoints.forEach((finishingPoint, index) =>
+        appendInkPoint(
+          draft.points,
+          finishingPoint,
+          index === finishingPoints.length - 1 ? 0 : captureSpacing
+        )
+      );
+    }
+    if (!draft.points.length) return;
+    const compactTolerance = Math.max(0.22, Math.min(0.72, draft.size * 0.075));
+    const points = snappedToLine
+      ? [...snappedToLine.points]
+      : compactInkPoints(draft.points, compactTolerance);
+    const bounds = objectBoundsFromPoints(points);
+    const ink = newInk({
+      notebookId: document.notebook.id,
+      ...(document.notebook.mode === "book" && interactionPageRef.current
+        ? { pageId: interactionPageRef.current.id }
+        : {}),
+      ...bounds,
+      zIndex: document.objects.length + 1,
+      points,
+      color: draft.color,
+      size: draft.size,
+      stabilizer: draft.stabilizer,
+      brush: draft.brush
+    });
+    props.onAdd(keepInsidePage(ink));
+    if (draft.recognizeShape) {
+      const shape = recognizeInkShape(ink);
+      if (shape) {
+        window.setTimeout(() => {
+          if (props.documentRef.current.objects.some((object) => object.id === ink.id))
+            props.onUpdate(
+              [ink],
+              [{ ...shape, id: ink.id, createdAt: ink.createdAt }],
+              t("ops.adjustShape")
+            );
+        }, 2000);
+      }
+    }
+  };
+
   const addAt = useCallback(
     (nextTool: Tool, point: Point) => {
       const base = {
@@ -508,7 +594,8 @@ export function EditorWorkspace(props: Props) {
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.currentTarget.dataset.pointerInput = event.pointerType;
-    const temporaryEraser = isPenEraserShortcut(event);
+    const temporaryEraser =
+      isPenEraserShortcut(event) || temporaryEraserPointers.current.has(event.pointerId);
     if (temporaryEraser) temporaryEraserPointers.current.add(event.pointerId);
     const penContact =
       event.pointerType === "pen" &&
@@ -634,7 +721,12 @@ export function EditorWorkspace(props: Props) {
     const drawInset =
       isInkTool || isShapeDrawing ? (tool === "highlighter" ? inkSize * 2 : inkSize / 2) + 2 : 0;
     const point = interactionPointAt(event, drawInset);
-    event.currentTarget.setPointerCapture(event.pointerId);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Some pen/WebView implementations can reject pointer capture even
+      // though the pointer event itself is valid. Interaction must continue.
+    }
     if (usesEraser) updateEraserCursor(event, temporaryEraser);
     if (isInkTool || isShapeDrawing) {
       clearStraightenGesture();
@@ -675,24 +767,7 @@ export function EditorWorkspace(props: Props) {
       return;
     }
     if (usesEraser) {
-      const erasePageId = interactionPageRef.current?.id;
-      const source = props.documentRef.current.objects.filter((object) =>
-        document.notebook.mode === "whiteboard" ? !object.pageId : object.pageId === erasePageId
-      );
-      const sourceIndex = new CanvasEngine();
-      sourceIndex.setObjects(source);
-      engine.current.select([]);
-      syncSelection();
-      eraserGestureRef.current = {
-        baseDocument: props.documentRef.current,
-        path: [point],
-        sourceIndex,
-        result: { before: [], after: [] }
-      };
-      eraserLastApplyAt.current = event.timeStamp;
-      dragRef.current = { kind: "erase", start: point };
-      setCanvasActive(true);
-      previewEraserGesture();
+      startEraserGesture(point, event.timeStamp);
       return;
     }
     if (tool === "hand" || event.button === 1) {
@@ -738,8 +813,35 @@ export function EditorWorkspace(props: Props) {
     event.currentTarget.dataset.pointerInput = event.pointerType;
     if (event.pointerType === "pen") {
       const shortcutDown = isPenEraserShortcut(event);
-      if (shortcutDown) temporaryEraserPointers.current.add(event.pointerId);
-      else if (temporaryEraserPointers.current.delete(event.pointerId) && tool !== "eraser") {
+      const shortcutWasDown = temporaryEraserPointers.current.has(event.pointerId);
+      const penInContact =
+        event.pressure > 0 ||
+        (event.buttons & 1) !== 0 ||
+        activePenPointers.current.has(event.pointerId);
+
+      if (shortcutDown) {
+        temporaryEraserPointers.current.add(event.pointerId);
+        if (!shortcutWasDown && penInContact && tool !== "eraser" && !readOnly) {
+          if (dragRef.current?.kind === "draw") finishInkDraft(event);
+          else {
+            clearStraightenGesture();
+            draftRef.current = undefined;
+          }
+
+          const hitPage = pageAt(worldAt(event));
+          if (document.notebook.mode !== "book" || hitPage) {
+            if (hitPage?.page && hitPage.page.id !== activePage?.id)
+              setCurrentPageId(hitPage.page.id);
+            interactionPageRef.current = hitPage?.page ?? activePage;
+            const point = interactionPointAt(event);
+            startEraserGesture(point, event.timeStamp);
+          } else {
+            dragRef.current = undefined;
+            interactionPageRef.current = undefined;
+            setCanvasActive(false);
+          }
+        }
+      } else if (temporaryEraserPointers.current.delete(event.pointerId) && tool !== "eraser") {
         if (dragRef.current?.kind === "erase") {
           const gesture = eraserGestureRef.current;
           if (gesture) {
@@ -752,8 +854,7 @@ export function EditorWorkspace(props: Props) {
           setCanvasActive(false);
 
           const resumesInk =
-            (tool === "pen" || tool === "pencil" || tool === "highlighter") &&
-            (event.pressure > 0 || (event.buttons & 1) !== 0);
+            (tool === "pen" || tool === "pencil" || tool === "highlighter") && penInContact;
           if (resumesInk) {
             const hitPage = pageAt(worldAt(event));
             if (document.notebook.mode !== "book" || hitPage) {
@@ -947,68 +1048,11 @@ export function EditorWorkspace(props: Props) {
       interactionPageRef.current = undefined;
       return;
     }
-    const straightenGesture = straightenGestureRef.current;
-    const snappedToLine =
-      straightenGesture?.pointerId === event.pointerId && draftRef.current?.straightLine;
-    clearStraightenGesture();
-    if (!state) return;
-    if (state.kind === "draw" && draftRef.current) {
-      const draft = draftRef.current;
-      draftRef.current = undefined;
-      if (!snappedToLine) {
-        const drawInset = draft.size / 2 + 2;
-        const captureSpacing = captureSpacingForZoom(cameraRef.current.zoom, draft.size);
-        appendCoalescedInkPoints(
-          draft.points,
-          event,
-          (sample) => interactionPointAt(sample, drawInset),
-          captureSpacing,
-          draft.stabilizerState
-        );
-        const finishingPoints = draft.stabilizerState.finish();
-        finishingPoints.forEach((finishingPoint, index) =>
-          appendInkPoint(
-            draft.points,
-            finishingPoint,
-            index === finishingPoints.length - 1 ? 0 : captureSpacing
-          )
-        );
-      }
-      if (draft.points.length > 0) {
-        const compactTolerance = Math.max(0.22, Math.min(0.72, draft.size * 0.075));
-        const points = snappedToLine
-          ? [...snappedToLine.points]
-          : compactInkPoints(draft.points, compactTolerance);
-        const bounds = objectBoundsFromPoints(points);
-        const ink = newInk({
-          notebookId: document.notebook.id,
-          ...(document.notebook.mode === "book" && interactionPageRef.current
-            ? { pageId: interactionPageRef.current.id }
-            : {}),
-          ...bounds,
-          zIndex: document.objects.length + 1,
-          points,
-          color: draft.color,
-          size: draft.size,
-          stabilizer: draft.stabilizer,
-          brush: draft.brush
-        });
-        props.onAdd(keepInsidePage(ink));
-        if (draft.recognizeShape) {
-          const shape = recognizeInkShape(ink);
-          if (shape) {
-            window.setTimeout(() => {
-              if (props.documentRef.current.objects.some((object) => object.id === ink.id))
-                props.onUpdate(
-                  [ink],
-                  [{ ...shape, id: ink.id, createdAt: ink.createdAt }],
-                  t("ops.adjustShape")
-                );
-            }, 2000);
-          }
-        }
-      }
+    if (!state) {
+      clearStraightenGesture();
+      return;
     }
+    if (state.kind === "draw") finishInkDraft(event);
     if (state.kind === "erase") {
       const gesture = eraserGestureRef.current;
       if (gesture) {
