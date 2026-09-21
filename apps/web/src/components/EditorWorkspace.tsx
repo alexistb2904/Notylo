@@ -128,6 +128,21 @@ interface EraserGestureState {
 const INTERNAL_CLIPBOARD = "application/x-notylo-objects";
 const STRAIGHTEN_DELAY_MS = 2_000;
 const STRAIGHTEN_STILLNESS_PX = 4;
+const PAN_START_THRESHOLD_PX = 6;
+const PEN_SECONDARY_BUTTON_MASK = 2;
+const PEN_ERASER_BUTTON_MASK = 32;
+
+function isPenEraserShortcut(
+  event: Pick<ReactPointerEvent, "pointerType" | "button" | "buttons">
+): boolean {
+  return (
+    event.pointerType === "pen" &&
+    (event.button === 2 ||
+      event.button === 5 ||
+      (event.buttons & PEN_SECONDARY_BUTTON_MASK) !== 0 ||
+      (event.buttons & PEN_ERASER_BUTTON_MASK) !== 0)
+  );
+}
 
 export function EditorWorkspace(props: Props) {
   const { document } = props;
@@ -165,6 +180,9 @@ export function EditorWorkspace(props: Props) {
   const [eraserSize, setEraserSize] = useState(() =>
     readStoredNumber("notylo-eraser-size", 18, 4, 72)
   );
+  const [eraserCursor, setEraserCursor] = useState<
+    { readonly x: number; readonly y: number; readonly temporary: boolean } | undefined
+  >(undefined);
   const [showPalette, setShowPalette] = useState(() =>
     readStoredBoolean("notylo-floating-palette", true)
   );
@@ -213,6 +231,7 @@ export function EditorWorkspace(props: Props) {
   const paletteInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const touchPointers = useRef(new Map<number, Point>());
   const ignoredTouchPointers = useRef(new Set<number>());
+  const temporaryEraserPointers = useRef(new Set<number>());
   const pinch = useRef<
     { distance: number; zoom: number; center: Point; camera: Camera } | undefined
   >(undefined);
@@ -278,6 +297,10 @@ export function EditorWorkspace(props: Props) {
   );
   useEffect(() => localStorage.setItem("notylo-eraser-mode", eraserMode), [eraserMode]);
   useEffect(() => localStorage.setItem("notylo-eraser-size", String(eraserSize)), [eraserSize]);
+  useEffect(() => {
+    if (tool !== "eraser" && temporaryEraserPointers.current.size === 0)
+      setEraserCursor(undefined);
+  }, [tool]);
   useEffect(() => {
     localStorage.setItem("notylo-pressure-sensitivity", String(inkDynamics.pressureSensitivity));
     localStorage.setItem("notylo-pressure-width", String(inkDynamics.pressureAffectsWidth));
@@ -368,6 +391,18 @@ export function EditorWorkspace(props: Props) {
     },
     [activePage, document.notebook.mode, pageOffsets, worldAt]
   );
+  const updateEraserCursor = (
+    event: Pick<ReactPointerEvent<HTMLDivElement>, "clientX" | "clientY">,
+    temporary: boolean
+  ) => {
+    const bounds = viewportRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    setEraserCursor({
+      x: event.clientX - bounds.left,
+      y: event.clientY - bounds.top,
+      temporary
+    });
+  };
   const syncSelection = useCallback(() => setSelectedIds(engine.current.selection), []);
   const queueDragOffset = useCallback((offset: Point) => {
     dragOffsetRef.current = offset;
@@ -472,19 +507,35 @@ export function EditorWorkspace(props: Props) {
   );
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const isInkTool = tool === "pen" || tool === "pencil" || tool === "highlighter";
-    const isShapeDrawing = tool === "shape" && shapeRecognition;
-    const isIconDrawing = tool === "icon";
+    const temporaryEraser = isPenEraserShortcut(event);
+    if (temporaryEraser) temporaryEraserPointers.current.add(event.pointerId);
+    const penContact =
+      event.pointerType === "pen" &&
+      (event.pressure > 0 ||
+        event.button === 0 ||
+        event.button === 5 ||
+        (event.buttons & 1) !== 0);
+    const usesEraser = tool === "eraser" || temporaryEraser;
+    const isInkTool =
+      !temporaryEraser && (tool === "pen" || tool === "pencil" || tool === "highlighter");
+    const isShapeDrawing = !temporaryEraser && tool === "shape" && shapeRecognition;
+    const isIconDrawing = !temporaryEraser && tool === "icon";
     const isDirectManipulationTool =
       isInkTool ||
       isShapeDrawing ||
       isIconDrawing ||
-      tool === "eraser" ||
+      usesEraser ||
       tool === "lasso" ||
       tool === "hand";
     if (event.button !== 0 && event.button !== 1 && event.pointerType !== "pen") return;
 
-    if (event.pointerType === "pen") {
+    if (temporaryEraser) updateEraserCursor(event, true);
+    if (temporaryEraser && !penContact) {
+      event.preventDefault();
+      return;
+    }
+
+    if (penContact) {
       activePenPointers.current.add(event.pointerId);
       penRecentAt.current = Date.now();
       for (const pointerId of touchPointers.current.keys())
@@ -505,7 +556,7 @@ export function EditorWorkspace(props: Props) {
         return;
       }
 
-      const touchNavigates = readOnly || (stylusOnly && (isInkTool || tool === "eraser"));
+      const touchNavigates = readOnly || (stylusOnly && (isInkTool || usesEraser));
       if (touchNavigates && !readOnly && activePenPointers.current.size > 0) {
         ignoredTouchPointers.current.add(event.pointerId);
         event.preventDefault();
@@ -538,7 +589,12 @@ export function EditorWorkspace(props: Props) {
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         interactionPageRef.current = undefined;
-        dragRef.current = { kind: "pan", start: { x: event.clientX, y: event.clientY } };
+        dragRef.current = {
+          kind: "pan",
+          start: { x: event.clientX, y: event.clientY },
+          panOrigin: { x: event.clientX, y: event.clientY },
+          panActive: false
+        };
         return;
       }
     }
@@ -547,7 +603,12 @@ export function EditorWorkspace(props: Props) {
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
       interactionPageRef.current = undefined;
-      dragRef.current = { kind: "pan", start: { x: event.clientX, y: event.clientY } };
+      dragRef.current = {
+          kind: "pan",
+          start: { x: event.clientX, y: event.clientY },
+          panOrigin: { x: event.clientX, y: event.clientY },
+          panActive: false
+        };
       return;
     }
 
@@ -555,7 +616,12 @@ export function EditorWorkspace(props: Props) {
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
       interactionPageRef.current = undefined;
-      dragRef.current = { kind: "pan", start: { x: event.clientX, y: event.clientY } };
+      dragRef.current = {
+          kind: "pan",
+          start: { x: event.clientX, y: event.clientY },
+          panOrigin: { x: event.clientX, y: event.clientY },
+          panActive: false
+        };
       return;
     }
     if (isDirectManipulationTool || event.button === 1) event.preventDefault();
@@ -568,6 +634,7 @@ export function EditorWorkspace(props: Props) {
       isInkTool || isShapeDrawing ? (tool === "highlighter" ? inkSize * 2 : inkSize / 2) + 2 : 0;
     const point = interactionPointAt(event, drawInset);
     event.currentTarget.setPointerCapture(event.pointerId);
+    if (usesEraser) updateEraserCursor(event, temporaryEraser);
     if (isInkTool || isShapeDrawing) {
       clearStraightenGesture();
       const preset = isShapeDrawing
@@ -606,7 +673,7 @@ export function EditorWorkspace(props: Props) {
       dragRef.current = { kind: "draw-icon", start: point };
       return;
     }
-    if (tool === "eraser") {
+    if (usesEraser) {
       const erasePageId = interactionPageRef.current?.id;
       const source = props.documentRef.current.objects.filter((object) =>
         document.notebook.mode === "whiteboard" ? !object.pageId : object.pageId === erasePageId
@@ -628,7 +695,12 @@ export function EditorWorkspace(props: Props) {
       return;
     }
     if (tool === "hand" || event.button === 1) {
-      dragRef.current = { kind: "pan", start: { x: event.clientX, y: event.clientY } };
+      dragRef.current = {
+          kind: "pan",
+          start: { x: event.clientX, y: event.clientY },
+          panOrigin: { x: event.clientX, y: event.clientY },
+          panActive: false
+        };
       return;
     }
     if (tool === "lasso") {
@@ -662,6 +734,63 @@ export function EditorWorkspace(props: Props) {
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "pen") {
+      const shortcutDown = isPenEraserShortcut(event);
+      if (shortcutDown) temporaryEraserPointers.current.add(event.pointerId);
+      else if (temporaryEraserPointers.current.delete(event.pointerId) && tool !== "eraser") {
+        if (dragRef.current?.kind === "erase") {
+          const gesture = eraserGestureRef.current;
+          if (gesture) {
+            appendEraserPoint(gesture.path, interactionPointAt(event), eraserSize);
+            previewEraserGesture();
+          }
+          finishEraserGesture();
+          dragRef.current = undefined;
+          interactionPageRef.current = undefined;
+          setCanvasActive(false);
+
+          const resumesInk =
+            (tool === "pen" || tool === "pencil" || tool === "highlighter") &&
+            (event.pressure > 0 || (event.buttons & 1) !== 0);
+          if (resumesInk) {
+            const hitPage = pageAt(worldAt(event));
+            if (document.notebook.mode !== "book" || hitPage) {
+              if (hitPage?.page && hitPage.page.id !== activePage?.id)
+                setCurrentPageId(hitPage.page.id);
+              interactionPageRef.current = hitPage?.page ?? activePage;
+              const drawInset = (tool === "highlighter" ? inkSize * 2 : inkSize / 2) + 2;
+              const point = interactionPointAt(event, drawInset);
+              const preset = BRUSHES.find((candidate) => candidate.id === brushId) ?? BRUSHES[0];
+              const stabilizerState = createInkStabilizer(inkSmoothing, {
+                zoom: cameraRef.current.zoom
+              });
+              draftRef.current = {
+                points: [stabilizerState.push(toInkPoint(event, point))],
+                tool,
+                color: inkColor,
+                size: tool === "highlighter" ? inkSize * 4 : inkSize,
+                stabilizer: inkSmoothing,
+                brush: { ...preset.brush, dynamics: inkDynamics },
+                stabilizerState
+              };
+              dragRef.current = { kind: "draw", start: point };
+              straightenGestureRef.current = {
+                pointerId: event.pointerId,
+                lastMotionPoint: point
+              };
+              setCanvasActive(true);
+            }
+          }
+        }
+        setEraserCursor(undefined);
+      }
+      if (tool === "eraser" || shortcutDown)
+        updateEraserCursor(event, shortcutDown && tool !== "eraser");
+      else setEraserCursor(undefined);
+    } else if (tool === "eraser") {
+      updateEraserCursor(event, false);
+    }
+
     if (event.pointerType === "touch") {
       if (ignoredTouchPointers.current.has(event.pointerId)) {
         event.preventDefault();
@@ -708,12 +837,20 @@ export function EditorWorkspace(props: Props) {
     )
       event.preventDefault();
     if (state.kind === "pan") {
+      const currentPoint = { x: event.clientX, y: event.clientY };
+      const panOrigin = state.panOrigin ?? state.start;
+      if (
+        !state.panActive &&
+        Math.hypot(currentPoint.x - panOrigin.x, currentPoint.y - panOrigin.y) <
+          PAN_START_THRESHOLD_PX
+      )
+        return;
       setCamera((current) => ({
         ...current,
-        x: current.x + event.clientX - state.start.x,
-        y: current.y + event.clientY - state.start.y
+        x: current.x + currentPoint.x - state.start.x,
+        y: current.y + currentPoint.y - state.start.y
       }));
-      dragRef.current = { ...state, start: { x: event.clientX, y: event.clientY } };
+      dragRef.current = { ...state, start: currentPoint, panActive: true };
       return;
     }
     if (readOnly) return;
@@ -788,10 +925,13 @@ export function EditorWorkspace(props: Props) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       return;
     }
+    const wasTemporaryEraser = temporaryEraserPointers.current.delete(event.pointerId);
     setCanvasActive(false);
     if (event.pointerType === "pen") {
       activePenPointers.current.delete(event.pointerId);
       penRecentAt.current = Date.now();
+      if (wasTemporaryEraser && tool !== "eraser") setEraserCursor(undefined);
+      else if (tool === "eraser") updateEraserCursor(event, false);
     }
     if (event.pointerType === "touch") {
       touchPointers.current.delete(event.pointerId);
@@ -1375,6 +1515,9 @@ export function EditorWorkspace(props: Props) {
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
+          onPointerLeave={(event) => {
+            if (!event.currentTarget.hasPointerCapture(event.pointerId)) setEraserCursor(undefined);
+          }}
           onDragStart={(event) => event.preventDefault()}
           onWheel={(event) => {
             if (event.ctrlKey || event.metaKey) {
@@ -1425,6 +1568,19 @@ export function EditorWorkspace(props: Props) {
           }}
           onDragOver={(event) => event.preventDefault()}
         >
+          {eraserCursor && (
+            <div
+              className="eraser-cursor"
+              aria-hidden="true"
+              data-temporary={eraserCursor.temporary ? "true" : "false"}
+              style={{
+                left: eraserCursor.x,
+                top: eraserCursor.y,
+                width: Math.max(4, eraserSize * camera.zoom),
+                height: Math.max(4, eraserSize * camera.zoom)
+              }}
+            />
+          )}
           <CanvasLayer
             documentRef={props.documentRef}
             activePageId={interactionPageRef.current?.id ?? activePage?.id}
