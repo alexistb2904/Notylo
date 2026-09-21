@@ -507,6 +507,7 @@ export function EditorWorkspace(props: Props) {
   );
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.dataset.pointerInput = event.pointerType;
     const temporaryEraser = isPenEraserShortcut(event);
     if (temporaryEraser) temporaryEraserPointers.current.add(event.pointerId);
     const penContact =
@@ -734,6 +735,7 @@ export function EditorWorkspace(props: Props) {
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.dataset.pointerInput = event.pointerType;
     if (event.pointerType === "pen") {
       const shortcutDown = isPenEraserShortcut(event);
       if (shortcutDown) temporaryEraserPointers.current.add(event.pointerId);
@@ -1511,6 +1513,9 @@ export function EditorWorkspace(props: Props) {
               ? whiteboardStyle(document.notebook.settings.whiteboardBackground)
               : undefined
           }
+          onPointerEnter={(event) => {
+            event.currentTarget.dataset.pointerInput = event.pointerType;
+          }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}

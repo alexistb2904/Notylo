@@ -319,6 +319,54 @@ test("previews an already placed vector shape while it is being dragged", async 
   expect(liveTransform).not.toBeNull();
 });
 
+test("hides the native cursor for pen and touch but restores it for mouse", async ({ page }) => {
+  await createNotebook(page, "Pointer cursor E2E");
+  const canvas = page.locator(".canvas-area");
+  const canvasBox = await canvas.boundingBox();
+  expect(canvasBox).not.toBeNull();
+  if (!canvasBox) return;
+  const point = {
+    x: canvasBox.x + canvasBox.width * 0.52,
+    y: canvasBox.y + canvasBox.height * 0.4
+  };
+
+  await canvas.dispatchEvent("pointermove", {
+    pointerType: "pen",
+    pointerId: 51,
+    button: -1,
+    buttons: 0,
+    pressure: 0,
+    clientX: point.x,
+    clientY: point.y
+  });
+  await expect(canvas).toHaveAttribute("data-pointer-input", "pen");
+  await expect.poll(() => canvas.evaluate((element) => getComputedStyle(element).cursor)).toBe("none");
+
+  await canvas.dispatchEvent("pointermove", {
+    pointerType: "touch",
+    pointerId: 52,
+    button: -1,
+    buttons: 0,
+    pressure: 0,
+    clientX: point.x,
+    clientY: point.y
+  });
+  await expect(canvas).toHaveAttribute("data-pointer-input", "touch");
+  await expect.poll(() => canvas.evaluate((element) => getComputedStyle(element).cursor)).toBe("none");
+
+  await canvas.dispatchEvent("pointermove", {
+    pointerType: "mouse",
+    pointerId: 1,
+    button: -1,
+    buttons: 0,
+    pressure: 0,
+    clientX: point.x,
+    clientY: point.y
+  });
+  await expect(canvas).toHaveAttribute("data-pointer-input", "mouse");
+  await expect.poll(() => canvas.evaluate((element) => getComputedStyle(element).cursor)).not.toBe("none");
+});
+
 test("shows a temporary eraser cursor for the stylus side button", async ({ page }) => {
   await createNotebook(page, "Stylus eraser E2E");
   const desktopTools = page.locator(".tool-rail");

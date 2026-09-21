@@ -808,6 +808,12 @@ input:focus-visible,
   background-image: radial-gradient(var(--tone-highlight) 0.65px, transparent 0.65px);
   background-size: 16px 16px;
 }
+.canvas-area[data-pointer-input="pen"],
+.canvas-area[data-pointer-input="pen"] *,
+.canvas-area[data-pointer-input="touch"],
+.canvas-area[data-pointer-input="touch"] * {
+  cursor: none !important;
+}
 .eraser-cursor {
   position: absolute;
   z-index: 7;
