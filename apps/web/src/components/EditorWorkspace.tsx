@@ -147,7 +147,9 @@ export function EditorWorkspace(props: Props) {
     () => readStoredPalette("notylo-ink-palette", DEFAULT_COLORS)[0] ?? "#292927"
   );
   const [inkSize, setInkSize] = useState(2.4);
-  const [inkSmoothing, setInkSmoothing] = useState(0.58);
+  const [inkSmoothing, setInkSmoothing] = useState(() =>
+    readStoredNumber("notylo-ink-smoothing", 0.58, 0, 1)
+  );
   const [brushId, setBrushId] = useState(
     () => localStorage.getItem("notylo-brush-id") ?? "ink-fineliner"
   );
@@ -210,6 +212,7 @@ export function EditorWorkspace(props: Props) {
   const internalClipboard = useRef<readonly DocumentObject[]>([]);
   const paletteInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const touchPointers = useRef(new Map<number, Point>());
+  const ignoredTouchPointers = useRef(new Set<number>());
   const pinch = useRef<
     { distance: number; zoom: number; center: Point; camera: Camera } | undefined
   >(undefined);
@@ -269,6 +272,10 @@ export function EditorWorkspace(props: Props) {
   );
   useEffect(() => localStorage.setItem("notylo-stylus-only", String(stylusOnly)), [stylusOnly]);
   useEffect(() => localStorage.setItem("notylo-brush-id", brushId), [brushId]);
+  useEffect(
+    () => localStorage.setItem("notylo-ink-smoothing", String(inkSmoothing)),
+    [inkSmoothing]
+  );
   useEffect(() => localStorage.setItem("notylo-eraser-mode", eraserMode), [eraserMode]);
   useEffect(() => localStorage.setItem("notylo-eraser-size", String(eraserSize)), [eraserSize]);
   useEffect(() => {
@@ -480,9 +487,23 @@ export function EditorWorkspace(props: Props) {
     if (event.pointerType === "pen") {
       activePenPointers.current.add(event.pointerId);
       penRecentAt.current = Date.now();
+      for (const pointerId of touchPointers.current.keys())
+        ignoredTouchPointers.current.add(pointerId);
+      touchPointers.current.clear();
+      pinch.current = undefined;
     }
 
     if (event.pointerType === "touch") {
+      const rejectAsPalm =
+        !readOnly &&
+        document.notebook.settings.palmRejection === "auto" &&
+        (activePenPointers.current.size > 0 || Date.now() - penRecentAt.current < 800);
+      if (rejectAsPalm) {
+        ignoredTouchPointers.current.add(event.pointerId);
+        event.preventDefault();
+        return;
+      }
+
       const touchNavigates = readOnly || (stylusOnly && (isInkTool || tool === "eraser"));
       if (touchNavigates && !readOnly && activePenPointers.current.size > 0) {
         event.preventDefault();
@@ -534,12 +555,6 @@ export function EditorWorkspace(props: Props) {
       dragRef.current = { kind: "pan", start: { x: event.clientX, y: event.clientY } };
       return;
     }
-    if (
-      document.notebook.settings.palmRejection === "auto" &&
-      event.pointerType === "touch" &&
-      Date.now() - penRecentAt.current < 800
-    )
-      return;
     if (isDirectManipulationTool || event.button === 1) event.preventDefault();
     const hitPage = pageAt(worldAt(event));
     if (document.notebook.mode === "book" && !hitPage && tool !== "hand" && event.button !== 1)
@@ -645,7 +660,14 @@ export function EditorWorkspace(props: Props) {
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.pointerType === "touch") {
-      if (!readOnly && stylusOnly && activePenPointers.current.size > 0) return;
+      if (ignoredTouchPointers.current.has(event.pointerId)) {
+        event.preventDefault();
+        return;
+      }
+      if (!readOnly && stylusOnly && activePenPointers.current.size > 0) {
+        event.preventDefault();
+        return;
+      }
       touchPointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     }
     if (pinch.current && touchPointers.current.size >= 2) {
@@ -757,8 +779,17 @@ export function EditorWorkspace(props: Props) {
   };
 
   const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "touch" && ignoredTouchPointers.current.delete(event.pointerId)) {
+      event.preventDefault();
+      if (event.currentTarget.hasPointerCapture(event.pointerId))
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      return;
+    }
     setCanvasActive(false);
-    if (event.pointerType === "pen") activePenPointers.current.delete(event.pointerId);
+    if (event.pointerType === "pen") {
+      activePenPointers.current.delete(event.pointerId);
+      penRecentAt.current = Date.now();
+    }
     if (event.pointerType === "touch") {
       touchPointers.current.delete(event.pointerId);
       if (touchPointers.current.size < 2) pinch.current = undefined;
@@ -1301,7 +1332,6 @@ export function EditorWorkspace(props: Props) {
               if (defaultBrush) {
                 setBrushId(defaultBrush.id);
                 setInkSize(defaultBrush.size);
-                setInkSmoothing(defaultBrush.stabilizer);
                 setInkDynamics(defaultBrush.brush.dynamics);
               }
             }}
