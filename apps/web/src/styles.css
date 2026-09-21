@@ -1525,7 +1525,10 @@ input:focus-visible,
 .inspector {
   width: 304px;
   flex: 0 0 304px;
+  min-height: 0;
   padding: 18px 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   color: var(--tone-100);
   background: var(--tone-950);
   border-left: 1px solid var(--tone-950);
