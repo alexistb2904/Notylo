@@ -50,6 +50,8 @@ export interface DragState {
     | "resize"
     | "arrow-point";
   readonly start: Point;
+  readonly panOrigin?: Point;
+  readonly panActive?: boolean;
   readonly originals?: readonly DocumentObject[];
   readonly handle?: ResizeHandle;
   readonly bounds?: Rect;
