@@ -399,7 +399,12 @@
 
   .inspector {
     z-index: 42;
+    min-height: 0;
     max-height: min(82dvh, 680px);
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
     border-radius: 22px 22px 0 0;
   }
 
