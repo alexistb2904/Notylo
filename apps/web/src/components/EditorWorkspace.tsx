@@ -721,7 +721,12 @@ export function EditorWorkspace(props: Props) {
     const drawInset =
       isInkTool || isShapeDrawing ? (tool === "highlighter" ? inkSize * 2 : inkSize / 2) + 2 : 0;
     const point = interactionPointAt(event, drawInset);
-    event.currentTarget.setPointerCapture(event.pointerId);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Some pen/WebView implementations can reject pointer capture even
+      // though the pointer event itself is valid. Interaction must continue.
+    }
     if (usesEraser) updateEraserCursor(event, temporaryEraser);
     if (isInkTool || isShapeDrawing) {
       clearStraightenGesture();
