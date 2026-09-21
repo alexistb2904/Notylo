@@ -298,6 +298,10 @@ export function EditorWorkspace(props: Props) {
   useEffect(() => localStorage.setItem("notylo-eraser-mode", eraserMode), [eraserMode]);
   useEffect(() => localStorage.setItem("notylo-eraser-size", String(eraserSize)), [eraserSize]);
   useEffect(() => {
+    if (tool !== "eraser" && temporaryEraserPointers.current.size === 0)
+      setEraserCursor(undefined);
+  }, [tool]);
+  useEffect(() => {
     localStorage.setItem("notylo-pressure-sensitivity", String(inkDynamics.pressureSensitivity));
     localStorage.setItem("notylo-pressure-width", String(inkDynamics.pressureAffectsWidth));
     localStorage.setItem("notylo-pressure-opacity", String(inkDynamics.pressureAffectsOpacity));
@@ -744,6 +748,39 @@ export function EditorWorkspace(props: Props) {
           dragRef.current = undefined;
           interactionPageRef.current = undefined;
           setCanvasActive(false);
+
+          const resumesInk =
+            (tool === "pen" || tool === "pencil" || tool === "highlighter") &&
+            (event.pressure > 0 || (event.buttons & 1) !== 0);
+          if (resumesInk) {
+            const hitPage = pageAt(worldAt(event));
+            if (document.notebook.mode !== "book" || hitPage) {
+              if (hitPage?.page && hitPage.page.id !== activePage?.id)
+                setCurrentPageId(hitPage.page.id);
+              interactionPageRef.current = hitPage?.page ?? activePage;
+              const drawInset = (tool === "highlighter" ? inkSize * 2 : inkSize / 2) + 2;
+              const point = interactionPointAt(event, drawInset);
+              const preset = BRUSHES.find((candidate) => candidate.id === brushId) ?? BRUSHES[0];
+              const stabilizerState = createInkStabilizer(inkSmoothing, {
+                zoom: cameraRef.current.zoom
+              });
+              draftRef.current = {
+                points: [stabilizerState.push(toInkPoint(event, point))],
+                tool,
+                color: inkColor,
+                size: tool === "highlighter" ? inkSize * 4 : inkSize,
+                stabilizer: inkSmoothing,
+                brush: { ...preset.brush, dynamics: inkDynamics },
+                stabilizerState
+              };
+              dragRef.current = { kind: "draw", start: point };
+              straightenGestureRef.current = {
+                pointerId: event.pointerId,
+                lastMotionPoint: point
+              };
+              setCanvasActive(true);
+            }
+          }
         }
         setEraserCursor(undefined);
       }
